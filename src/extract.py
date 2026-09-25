@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import (parse_qsl, quote, urlencode, urljoin, urlparse,
                           urlunparse)
 
@@ -42,6 +42,34 @@ PAYWALL_MARKERS = (
     "become a member to",
     "unlock this article",
     "continue reading your article",
+)
+
+# Bot-check signatures. Machine-facing identifiers -- script endpoints, JS
+# globals and cookie names -- because the human-readable copy on these pages
+# changes freely and is localized.
+CHALLENGE_MARKUP = (
+    "/cdn-cgi/challenge-platform",   # Cloudflare managed challenge
+    "challenges.cloudflare.com",     # Turnstile
+    "_cf_chl_opt",
+    "__cf$cv$params",
+    "window._cf_chl",
+    "captcha-delivery.com",          # DataDome
+    "_incapsula_resource",           # Imperva / Incapsula
+    "perimeterx",                    # PerimeterX / HUMAN
+    "px-captcha",
+    "queue-it.net",                  # Queue-it waiting room
+    "/akam/",                        # Akamai Bot Manager
+    "bm-verify",
+)
+
+# Only consulted when nothing above matched, and only near the top of the
+# document, so an article *about* paywalls isn't mistaken for one.
+CHALLENGE_TEXT = (
+    "just a moment",
+    "checking your browser",
+    "cf-browser-verification",
+    "enable javascript and cookies",
+    "captcha-delivery",
 )
 
 ALLOWED_TAGS = {
@@ -83,6 +111,7 @@ class Extracted:
     status_code: int = 0
     source: str = "direct"
     images: list[str] = field(default_factory=list)
+    headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def word_count(self) -> int:
@@ -215,9 +244,19 @@ def strip_scripts(html: str) -> str:
 # --------------------------------------------------------------------------
 
 
+class Fetched(NamedTuple):
+    """What a request gave back. Headers are kept because a bot check is far
+    easier to recognize from them than from the page body."""
+
+    html: str
+    status_code: int
+    url: str
+    headers: dict[str, str]
+
+
 def fetch(url: str, user_agent: str, timeout: int = 25,
-          session: requests.Session | None = None) -> tuple[str, int, str]:
-    """Return (html, status_code, final_url)."""
+          session: requests.Session | None = None) -> Fetched:
+    """Return the body, status, final URL and response headers."""
     sess = session or requests.Session()
     headers = {
         "User-Agent": user_agent,
@@ -233,7 +272,8 @@ def fetch(url: str, user_agent: str, timeout: int = 25,
     content_type = resp.headers.get("Content-Type", "")
     if "html" not in content_type and "xml" not in content_type:
         raise FetchError(f"Not an HTML page (Content-Type: {content_type!r})")
-    return resp.text, resp.status_code, resp.url
+    return Fetched(resp.text, resp.status_code, resp.url,
+                   dict(resp.headers))
 
 
 def _meta_content(soup: BeautifulSoup, *names: str) -> str | None:
@@ -246,10 +286,11 @@ def _meta_content(soup: BeautifulSoup, *names: str) -> str | None:
 
 
 def extract(html: str, url: str, status_code: int = 200,
-            source: str = "direct") -> Extracted:
+            source: str = "direct",
+            headers: dict[str, str] | None = None) -> Extracted:
     """Run readability extraction and pull metadata out of a page."""
     result = Extracted(url=url, html=html, status_code=status_code,
-                       source=source)
+                       source=source, headers=dict(headers or {}))
 
     readable = trafilatura.extract(
         html, url=url, output_format="html", include_links=True,
@@ -314,6 +355,11 @@ def looks_paywalled(result: Extracted, min_words: int = 200) -> bool:
     """Heuristic: did we get a stub instead of the article?"""
     if result.status_code in (401, 402, 403, 451):
         return True
+    # A live page can serve the same bot check archive.today does -- "enable
+    # JavaScript and cookies to continue". Without this the interstitial gets
+    # archived as though it were the article.
+    if is_challenge_page(result.html, result.headers):
+        return True
     haystack = f"{result.text}\n{result.excerpt or ''}".lower()
     if any(marker in haystack for marker in PAYWALL_MARKERS):
         return True
@@ -345,8 +391,9 @@ def fetch_from_archive_ph(url: str, user_agent: str, hosts: list[str],
     for host in hosts:
         snapshot_url = f"https://{host}/newest/{url}"
         try:
-            html, status, final_url = fetch(snapshot_url, user_agent, timeout,
-                                            session)
+            fetched = fetch(snapshot_url, user_agent, timeout, session)
+            html, status, final_url = (fetched.html, fetched.status_code,
+                                       fetched.url)
         except FetchError as exc:
             errors.append(f"{host}: {exc}")
             continue
@@ -357,7 +404,7 @@ def fetch_from_archive_ph(url: str, user_agent: str, hosts: list[str],
         if status >= 400:
             errors.append(f"{host}: HTTP {status}")
             continue
-        if _is_challenge_page(html):
+        if is_challenge_page(html, fetched.headers):
             errors.append(f"{host}: blocked by a bot check")
             continue
         if "/newest/" in final_url or "/submit" in final_url:
@@ -368,14 +415,30 @@ def fetch_from_archive_ph(url: str, user_agent: str, hosts: list[str],
     raise FetchError("; ".join(errors) or "no archive.today host responded")
 
 
-def _is_challenge_page(html: str) -> bool:
-    lowered = html[:4000].lower()
-    return any(
-        marker in lowered
-        for marker in ("just a moment", "checking your browser",
-                       "cf-browser-verification", "enable javascript and cookies",
-                       "captcha-delivery")
-    )
+def is_challenge_page(html: str,
+                      headers: dict[str, str] | None = None) -> bool:
+    """Is this a bot check rather than the page we asked for?
+
+    Prose is the weakest signal available: it is localized, A/B tested and
+    reworded without notice -- the Cloudflare interstitial that prompted this
+    says "Please hold a moment" and matches none of the stock phrases. So go
+    by what the machinery emits instead, and keep text as a last resort.
+    """
+    if headers:
+        lowered = {str(k).lower(): str(v).lower() for k, v in headers.items()}
+        # Cloudflare states it outright when it intervenes.
+        if "challenge" in lowered.get("cf-mitigated", ""):
+            return True
+        if lowered.get("x-datadome", "") == "protected":
+            return True
+
+    # Vendor infrastructure: script endpoints, JS globals and cookie names.
+    # These are machine-facing identifiers, so they survive rewording.
+    haystack = html.lower()
+    if any(marker in haystack for marker in CHALLENGE_MARKUP):
+        return True
+
+    return any(marker in html[:4000].lower() for marker in CHALLENGE_TEXT)
 
 
 def dump_metadata(result: Extracted) -> str:

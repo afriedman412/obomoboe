@@ -24,7 +24,8 @@ from bs4 import BeautifulSoup
 
 from . import db
 from .extract import (Extracted, FetchError, dump_metadata, extract, fetch,
-                      fetch_from_archive_ph, looks_paywalled, strip_scripts)
+                      fetch_from_archive_ph, is_challenge_page,
+                      looks_paywalled, strip_scripts)
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,19 @@ def archive_article(config: dict[str, Any], article_id: int,
             db.update_article(conn, article_id, archive_status=db.FAILED,
                               archive_error=note, archived_at=db.utcnow())
             return {"ok": False, "error": note}
+
+        # Never trade a good archive for a worse one. A re-archive that trips
+        # a bot check would otherwise overwrite the saved files and replace
+        # the real title with the interstitial's.
+        existing_words = int(row["word_count"] or 0)
+        if (row["archive_status"] == db.OK
+                and result.word_count < existing_words):
+            kept = _note(note, f"kept the earlier copy ({existing_words} "
+                               f"words); this attempt got {result.word_count}")
+            db.update_article(conn, article_id, archive_status=db.OK,
+                              archive_error=kept, archived_at=db.utcnow())
+            return {"ok": True, "source": row["archive_source"],
+                    "word_count": existing_words, "note": kept, "kept": True}
 
         _write_snapshot(config, article_id, result)
 
@@ -117,13 +131,16 @@ def _retrieve(config: dict[str, Any], url: str,
 
     if not force_archive_ph:
         try:
-            html, status, final_url = fetch(url, user_agent, timeout, session)
-            direct = extract(html, final_url or url, status, source="direct")
+            got = fetch(url, user_agent, timeout, session)
+            direct = extract(got.html, got.url or url, got.status_code,
+                             source="direct", headers=got.headers)
             if not looks_paywalled(direct, config["MIN_WORDS"]):
                 return direct, None
             direct_error = (
-                f"live page looked paywalled or truncated "
-                f"({direct.word_count} words)"
+                "live page returned a bot check"
+                if is_challenge_page(direct.html, direct.headers)
+                else f"live page looked paywalled or truncated "
+                     f"({direct.word_count} words)"
             )
         except FetchError as exc:
             direct_error = f"live fetch failed ({exc})"

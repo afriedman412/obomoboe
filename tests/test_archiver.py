@@ -2,6 +2,7 @@
 import pytest
 
 from src import archiver, db
+from src import extract as extract_mod
 from src.extract import FetchError
 
 FULL_PAGE = """
@@ -33,7 +34,7 @@ class TestArchiveArticle:
         article_id = make_article(conn)
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (FULL_PAGE, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(FULL_PAGE, 200, url, {}))
 
         result = archiver.archive_article(config, article_id)
         assert result["ok"] is True
@@ -54,7 +55,7 @@ class TestArchiveArticle:
         article_id = make_article(conn)
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (FULL_PAGE, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(FULL_PAGE, 200, url, {}))
         archiver.archive_article(config, article_id)
         assert db.search_ids(conn, "Sentence") == [article_id]
 
@@ -63,7 +64,7 @@ class TestArchiveArticle:
         page = FULL_PAGE.replace("<article>", "<script>evil()</script><article>")
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (page, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(page, 200, url, {}))
         archiver.archive_article(config, article_id)
 
         raw = (archiver.article_dir(config, article_id) / "original.html").read_text()
@@ -91,7 +92,7 @@ class TestArchiveTodayFallback:
 
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (PAYWALL_STUB, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(PAYWALL_STUB, 200, url, {}))
         monkeypatch.setattr(
             archiver, "fetch_from_archive_ph",
             lambda url, ua, hosts, timeout, session=None: (FULL_PAGE, 200, url))
@@ -110,7 +111,7 @@ class TestArchiveTodayFallback:
         article_id = make_article(conn)
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (PAYWALL_STUB, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(PAYWALL_STUB, 200, url, {}))
         monkeypatch.setattr(
             archiver, "fetch_from_archive_ph",
             lambda url, ua, hosts, timeout, session=None: (PAYWALL_STUB, 200, url))
@@ -129,7 +130,7 @@ class TestArchiveTodayFallback:
 
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None: (PAYWALL_STUB, 200, url))
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(PAYWALL_STUB, 200, url, {}))
         monkeypatch.setattr(archiver, "fetch_from_archive_ph", no_snapshot)
 
         archiver.archive_article(config, article_id)
@@ -182,3 +183,34 @@ class TestEnqueue:
         while not archiver._queue.empty():
             archiver._queue.get()
             archiver._queue.task_done()
+
+
+class TestDoesNotDegradeGoodArchive:
+    def test_bot_check_does_not_overwrite_a_good_copy(self, config, conn,
+                                                      monkeypatch):
+        article_id = make_article(conn)
+        monkeypatch.setattr(
+            archiver, "fetch",
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(FULL_PAGE, 200, url, {}))
+        archiver.archive_article(config, article_id)
+        good = db.get_article(conn, article_id)
+        assert good["archive_status"] == "ok"
+
+        challenge = ("<html><head><title>Just a moment...</title></head><body>"
+                     "<p>Enable JavaScript and cookies to continue</p>"
+                     "</body></html>")
+        monkeypatch.setattr(
+            archiver, "fetch",
+            lambda url, ua, timeout, session=None: extract_mod.Fetched(challenge, 200, url, {}))
+
+        archiver.archive_article(config, article_id)
+
+        row = db.get_article(conn, article_id)
+        assert row["title"] == good["title"], "title was clobbered"
+        assert row["word_count"] == good["word_count"]
+        assert row["archive_status"] == "ok"
+        assert "kept the earlier copy" in row["archive_error"]
+        # The files on disk must still be the good copy, not the bot check.
+        text = (archiver.article_dir(config, article_id) / "article.txt").read_text()
+        assert "Sentence 1" in text
+        assert "Enable JavaScript" not in text

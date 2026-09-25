@@ -1,6 +1,7 @@
 import pytest
 
-from src.extract import (Extracted, extract, looks_paywalled, normalize_url,
+from src.extract import (CHALLENGE_TEXT, Extracted, extract,
+                         is_challenge_page, looks_paywalled, normalize_url,
                          sanitize_fragment)
 
 ARTICLE_HTML = """
@@ -108,3 +109,48 @@ class TestPaywallDetection:
         result = Extracted(url="https://x.com", text=" ".join(["w"] * 900),
                            status_code=403)
         assert looks_paywalled(result, min_words=200)
+
+
+class TestChallengePage:
+    CHALLENGE = """
+    <html><head><title>Just a moment...</title></head>
+    <body><h1>Please hold a moment...</h1>
+    <p>Enable JavaScript and cookies to continue</p></body></html>
+    """
+
+    def test_bot_check_is_not_treated_as_an_article(self):
+        result = extract(self.CHALLENGE, "https://example.com/post")
+        assert looks_paywalled(result)
+
+    def test_bot_check_caught_even_above_the_word_threshold(self):
+        # Length alone must not clear it: a wordy interstitial is still not
+        # the article.
+        padded = self.CHALLENGE.replace(
+            "</body>", "<p>" + "filler " * 400 + "</p></body>")
+        result = extract(padded, "https://example.com/post")
+        assert result.word_count > 200
+        assert looks_paywalled(result)
+
+    def test_detected_with_no_matching_prose_at_all(self):
+        """The real Cloudflare interstitial says "Please hold a moment" and
+        matches none of the stock phrases -- markup has to carry it."""
+        page = """
+        <html><head><title>Please hold a moment&hellip;</title></head>
+        <body><p>We are just confirming your site connection is secure.</p>
+        <script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1">
+        </script></body></html>
+        """
+        assert not any(m in page.lower() for m in CHALLENGE_TEXT), \
+            "fixture must not rely on the text markers"
+        assert is_challenge_page(page)
+
+    def test_response_headers_alone_are_enough(self):
+        innocuous = "<html><body><p>nothing telling here</p></body></html>"
+        assert not is_challenge_page(innocuous)
+        assert is_challenge_page(innocuous, {"CF-Mitigated": "challenge"})
+
+    def test_ordinary_page_behind_cloudflare_is_not_a_challenge(self):
+        """Much of the web is served by Cloudflare; that alone proves nothing."""
+        page = "<html><body>" + "<p>real words here</p>" * 50 + "</body></html>"
+        assert not is_challenge_page(
+            page, {"Server": "cloudflare", "CF-Ray": "a40b98-IAD"})
