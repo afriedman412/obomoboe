@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title or article.url }}{% endblock %}
+
+{% block content %}
+<article class="reader">
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
+
+  <h1>{{ article.title or article.url }}</h1>
+
+  <div class="byline">
+    {% if article.author %}<span>{{ article.author }}</span>{% endif %}
+    <a href="{{ article.original_url }}" target="_blank" rel="noreferrer">
+      {{ article.site_name or article.original_url | hostname }} &nearr;</a>
+    {% if article.published_at %}<span>{{ article.published_at | humandate }}</span>{% endif %}
+    {% if article.word_count %}<span>{{ article.word_count }} words</span>{% endif %}
+    {% set thin = article.archive_status == 'ok' and article.archive_error %}
+    <span class="pill pill--{{ 'thin' if thin else article.archive_status }}">
+      {%- if thin %}partial
+      {%- else %}{{ {'pending': 'archiving...', 'ok': 'archived',
+                     'failed': 'archive failed'}[article.archive_status] }}
+      {%- endif %}
+      {%- if article.archive_source == 'archive.today' %} via archive.today{% endif %}
+    </span>
+  </div>
+
+  <div class="toolbar">
+    <form method="post" action="{{ url_for('main.set_status', article_id=article.id) }}">
+      <input type="hidden" name="status"
+             value="{{ 'unread' if article.status == 'read' else 'read' }}">
+      <button type="submit" class="primary">
+        Mark {{ 'unread' if article.status == 'read' else 'read' }}
+      </button>
+    </form>
+    {% if has_original %}
+      <a href="{{ url_for('main.original', article_id=article.id) }}" target="_blank">
+        original snapshot</a>
+    {% endif %}
+    <form method="post" action="{{ url_for('main.rearchive', article_id=article.id) }}">
+      <button type="submit">re-archive</button>
+    </form>
+    <form method="post" action="{{ url_for('main.rearchive', article_id=article.id) }}">
+      <input type="hidden" name="source" value="archive.ph">
+      <button type="submit">try archive.today</button>
+    </form>
+    <form method="post" action="{{ url_for('main.delete', article_id=article.id) }}"
+          onsubmit="return confirm('Delete this article and its archive?')">
+      <button type="submit" class="danger">delete</button>
+    </form>
+  </div>
+
+  {% if article.archive_error %}
+    <p class="notice">
+      {{ article.archive_error }}
+      &mdash; <a href="{{ submit_url }}" target="_blank" rel="noreferrer">
+        make a snapshot on archive.today by hand</a>, then re-archive.
+    </p>
+  {% endif %}
+
+  <form class="tag-editor" method="post"
+        action="{{ url_for('main.edit_tags', article_id=article.id) }}">
+    {% for name in article.tags %}
+      <span class="chip">{{ name }}
+        <button type="submit" name="remove" value="{{ name }}"
+                title="Remove tag">&times;</button></span>
+    {% endfor %}
+    <input type="text" name="add" placeholder="add tags, comma separated">
+    <button type="submit">save</button>
+  </form>
+
+  {% if body %}
+    <div class="prose">{{ body }}</div>
+  {% elif article.archive_status == 'pending' %}
+    <p class="empty">Archiving now &mdash; reload in a moment.</p>
+  {% else %}
+    <p class="empty">No readable copy was saved.
+      {% if has_original %}The raw snapshot is still available above.{% endif %}</p>
+  {% endif %}
+
+  <form class="notes" method="post"
+        action="{{ url_for('main.edit_notes', article_id=article.id) }}">
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="4"
+              placeholder="Why you saved it, what you thought">{{ article.notes }}</textarea>
+    <button type="submit">save notes</button>
+  </form>
+</article>
+{% endblock %}

@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{# '=' means "keep whatever the page is already filtered by" #}
+{% macro querylink(new_status='=', new_tag='=') -%}
+  {{ url_for('main.index',
+             status=(status if new_status == '=' else new_status),
+             tag=((tag if new_tag == '=' else new_tag) or None),
+             q=(query or None),
+             sort=sort) }}
+{%- endmacro %}
+
+{% block content %}
+<form class="add" action="{{ url_for('main.add') }}" method="post" id="add-form">
+  <input type="url" name="url" placeholder="Paste an article URL"
+         autocomplete="off" autofocus required>
+  <input type="text" name="tags" placeholder="tags (optional, comma separated)">
+  <button type="submit">Add</button>
+</form>
+
+<div class="controls">
+  <div class="tabs">
+    <a class="tab {{ 'is-on' if status == 'all' }}" href="{{ querylink(new_status='all') }}">
+      All <span>{{ counts.total }}</span>
+    </a>
+    <a class="tab {{ 'is-on' if status == 'unread' }}" href="{{ querylink(new_status='unread') }}">
+      Unread <span>{{ counts.unread }}</span>
+    </a>
+    <a class="tab {{ 'is-on' if status == 'read' }}" href="{{ querylink(new_status='read') }}">
+      Read <span>{{ counts.read }}</span>
+    </a>
+  </div>
+
+  <form class="search" method="get" action="{{ url_for('main.index') }}">
+    <input type="hidden" name="status" value="{{ status }}">
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}
+    <input type="search" name="q" value="{{ query }}" placeholder="Search title and full text">
+    <select name="sort" onchange="this.form.submit()">
+      {% for key, label in [('added_desc','Newest first'), ('added_asc','Oldest first'),
+                            ('title','Title A-Z'), ('site','Site'),
+                            ('published','Date published'),
+                            ('longest','Longest'), ('shortest','Shortest')] %}
+        <option value="{{ key }}" {{ 'selected' if sort == key }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if tags %}
+<div class="tagbar">
+  {% if tag %}
+    <a class="chip is-on" href="{{ querylink(new_tag=None) }}">{{ tag }} &times;</a>
+  {% endif %}
+  {% for item in tags %}
+    {% if item.name != tag %}
+      <a class="chip" href="{{ querylink(new_tag=item.name) }}">{{ item.name }}
+        <span>{{ item.count }}</span></a>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not articles %}
+  <p class="empty">
+    {% if query or tag %}Nothing matches that.{% else %}
+    Nothing here yet. Paste a URL above to start.{% endif %}
+  </p>
+{% endif %}
+
+<ul class="articles">
+  {% for a in articles %}
+  <li class="article {{ 'is-read' if a.status == 'read' }}"
+      data-id="{{ a.id }}" data-archive="{{ a.archive_status }}">
+    <button class="toggle" type="button" data-action="toggle"
+            title="Mark {{ 'unread' if a.status == 'read' else 'read' }}"
+            aria-label="Mark {{ 'unread' if a.status == 'read' else 'read' }}"></button>
+
+    <div class="body">
+      <a class="title" href="{{ url_for('main.article', article_id=a.id) }}">
+        {{ a.title or a.url }}
+      </a>
+      <div class="meta">
+        <a class="site" href="{{ a.original_url }}" target="_blank" rel="noreferrer">
+          {{ a.site_name or a.original_url | hostname }} &nearr;</a>
+        <span>added {{ a.added_at | humandate }}</span>
+        {% if a.word_count %}<span>{{ a.word_count }} words</span>{% endif %}
+        {% if a.published_at %}<span>pub. {{ a.published_at | humandate }}</span>{% endif %}
+        {% set thin = a.archive_status == 'ok' and a.archive_error %}
+        <span class="pill pill--{{ 'thin' if thin else a.archive_status }}"
+              data-role="archive-pill" title="{{ a.archive_error or '' }}">
+          {%- if thin %}partial
+          {%- else %}{{ {'pending': 'archiving...', 'ok': 'archived',
+                         'failed': 'archive failed'}[a.archive_status] }}
+          {%- endif %}
+          {%- if a.archive_source == 'archive.today' %} via archive.today{% endif %}
+        </span>
+      </div>
+      <div class="tags" data-role="tags">
+        {% for name in a.tags %}
+          <a class="chip chip--sm" href="{{ querylink(new_tag=name) }}">{{ name }}</a>
+        {% endfor %}
+        <button class="chip chip--add" type="button" data-action="add-tag">+ tag</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <a href="{{ url_for('main.article', article_id=a.id) }}">read</a>
+      <button type="button" data-action="delete">delete</button>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

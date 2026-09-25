@@ -1,0 +1,58 @@
+"""Configuration, all overridable by OBOMOBOE_* environment variables."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    data_dir = Path(os.environ.get("OBOMOBOE_DATA_DIR", BASE_DIR / "data"))
+    config: dict[str, Any] = {
+        "DATA_DIR": data_dir,
+        "DB_PATH": data_dir / "obomoboe.db",
+        "ARCHIVE_DIR": data_dir / "archives",
+        "USER_AGENT": os.environ.get("OBOMOBOE_USER_AGENT", DEFAULT_USER_AGENT),
+        "FETCH_TIMEOUT": _env_int("OBOMOBOE_FETCH_TIMEOUT", 25),
+        # Snapshot images alongside the text so the archive survives link rot.
+        "ARCHIVE_IMAGES": _env_bool("OBOMOBOE_ARCHIVE_IMAGES", True),
+        "MAX_IMAGES": _env_int("OBOMOBOE_MAX_IMAGES", 25),
+        "MAX_IMAGE_BYTES": _env_int("OBOMOBOE_MAX_IMAGE_BYTES", 5_000_000),
+        # Below this word count a "successful" fetch is treated as a paywall stub.
+        "MIN_WORDS": _env_int("OBOMOBOE_MIN_WORDS", 200),
+        "ARCHIVE_PH_ENABLED": _env_bool("OBOMOBOE_ARCHIVE_PH", True),
+        "ARCHIVE_PH_HOSTS": [
+            h.strip()
+            for h in os.environ.get(
+                "OBOMOBOE_ARCHIVE_PH_HOSTS", "archive.ph,archive.today,archive.is"
+            ).split(",")
+            if h.strip()
+        ],
+        "ARCHIVE_WORKERS": _env_int("OBOMOBOE_WORKERS", 2),
+        # Set false in tests so archiving runs inline / not at all.
+        "START_WORKERS": True,
+    }
+    if overrides:
+        config.update(overrides)
+    return config

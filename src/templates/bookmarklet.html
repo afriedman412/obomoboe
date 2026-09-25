@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}bookmarklet &middot; obomoboe{% endblock %}
+
+{% block content %}
+<div class="reader">
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
+  <h1>One-click saving</h1>
+  <p>Drag this to your bookmarks bar. Clicking it on any page saves that page
+    to your list.</p>
+  <p style="margin: 24px 0;">
+    <a class="bookmarklet-drag" href="{{ code }}">Save to obomoboe</a>
+  </p>
+  <p style="color: var(--muted); font-size: 13.5px;">
+    It posts the current URL to <code>{{ base }}/add</code>, so it only works
+    while this app is running.
+  </p>
+</div>
+{% endblock %}

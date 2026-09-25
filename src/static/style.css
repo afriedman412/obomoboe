@@ -1,0 +1,639 @@
+/* obomoboe -- a villain's commonplace book.
+   Cream stock, olive and burnt-umber inks, laid in slabs and rubber-stamped.
+   Palette: #6E3511 umber / #91AC67 sage / #597928 moss / #FCECD8 paper. */
+
+:root {
+  --paper: #fcecd8;
+  --panel: #fff6e9;
+  --ink: #2a1608;
+  --muted: #7a5b3e;
+  --line: #ddc4a2;
+  --line-hard: #2a1608;
+
+  --umber: #6e3511;
+  --moss: #597928;
+  /* Deeper cut for small stamped text and filled chips -- plain --moss
+     lands just under AA at 10.5px. */
+  --moss-deep: #4f6b23;
+  --sage: #91ac67;
+  --sage-soft: #e6ecd6;
+  --umber-soft: #f3ded0;
+
+  --danger: #8f2f14;
+  --warn: #8a5a12;
+  --warn-soft: #f6e4c8;
+
+  --radius: 2px;
+  --slab: 3px 3px 0 var(--line-hard);
+  --slab-lift: 5px 5px 0 var(--line-hard);
+
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino,
+           "Book Antiqua", Georgia, serif;
+  --stencil: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #17100a;
+    --panel: #201710;
+    --ink: #f2e2cc;
+    --muted: #b09373;
+    --line: #3d2c1c;
+    /* Ink inverts to light here, or the slab edges and shadows disappear
+       into the ground. */
+    --line-hard: #5d4630;
+
+    --umber: #d08a49;
+    --moss: #9dbe6e;
+    --moss-deep: #9dbe6e;
+    --sage: #91ac67;
+    --sage-soft: #26301b;
+    --umber-soft: #33210f;
+
+    --danger: #dd7a5b;
+    --warn: #d2a85a;
+    --warn-soft: #33260f;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 var(--serif);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Paper tooth. Decorative only -- never intercepts a click. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: .22;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark) {
+  body::before { mix-blend-mode: screen; opacity: .1; }
+}
+
+::selection { background: var(--sage); color: #17100a; }
+
+main { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; }
+
+a { color: var(--umber); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* Stenciled municipal lettering -- meta, labels, anything administrative. */
+.meta, .pill, .tab, .chip, .crumbs, .byline, .notes label,
+.topbar nav a, .actions, .toolbar button, .search select {
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  letter-spacing: .04em;
+}
+
+/* ---------- chrome ---------- */
+
+.topbar {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 26px 20px 16px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 2px solid var(--line-hard);
+  box-shadow: 0 3px 0 var(--sage);
+}
+.brand {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 23px;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.brand::before {
+  content: "❦";
+  color: var(--umber);
+  margin-right: 8px;
+  font-size: 18px;
+}
+.brand:hover { text-decoration: none; color: var(--umber); }
+.topbar nav a { color: var(--muted); text-transform: uppercase; }
+.topbar nav a:hover { color: var(--umber); }
+
+.flashes { list-style: none; max-width: 900px; margin: 14px auto 0; padding: 0 20px; }
+.flash {
+  padding: 9px 13px;
+  border: 1.5px solid var(--line-hard);
+  border-left-width: 6px;
+  border-left-color: var(--moss);
+  background: var(--sage-soft);
+  color: var(--ink);
+  font-size: 13.5px;
+  margin-bottom: 8px;
+}
+.flash--error { background: var(--warn-soft); border-left-color: var(--danger); }
+
+/* ---------- add form ---------- */
+
+.add { display: flex; gap: 10px; margin: 26px 0; }
+.add input[type=url] { flex: 3; }
+.add input[type=text] { flex: 2; }
+
+input, select, textarea, button {
+  font: inherit;
+  font-family: var(--serif);
+  color: var(--ink);
+  background: var(--panel);
+  border: 1.5px solid var(--line-hard);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .75; }
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--umber);
+  outline-offset: 2px;
+}
+button { cursor: pointer; }
+
+.add button, button.primary {
+  background: var(--umber);
+  border-color: var(--line-hard);
+  color: #fcecd8;
+  font-family: var(--stencil);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  padding-inline: 20px;
+  box-shadow: var(--slab);
+}
+.add button:hover, button.primary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--slab-lift);
+}
+.add button:active, button.primary:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--line-hard);
+}
+button.danger { color: var(--danger); border-color: var(--danger); }
+button.danger:hover { background: var(--danger); color: var(--paper); }
+
+/* ---------- controls ---------- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.tabs { display: flex; gap: 4px; }
+.tab {
+  padding: 7px 13px 5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  border-bottom: 3px solid transparent;
+}
+.tab span { opacity: .65; font-variant-numeric: tabular-nums; }
+.tab:hover { color: var(--ink); text-decoration: none; }
+/* Active filter gets a painted road marking. */
+.tab.is-on {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom-color: var(--umber);
+}
+
+.search { display: flex; gap: 8px; }
+.search input { min-width: 230px; }
+.search select { color: var(--muted); text-transform: uppercase; padding: 8px 10px; }
+
+.tagbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 22px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1.5px solid var(--sage);
+  border-radius: var(--radius);
+  background: var(--sage-soft);
+  color: var(--moss-deep);
+  line-height: 1.7;
+}
+.chip:hover {
+  text-decoration: none;
+  border-color: var(--line-hard);
+  color: var(--ink);
+  background: var(--sage);
+}
+.chip span { opacity: .6; }
+.chip.is-on {
+  background: var(--moss-deep);
+  color: #fcecd8;
+  border-color: var(--line-hard);
+  box-shadow: 2px 2px 0 var(--line-hard);
+}
+.chip--sm { font-size: 11px; padding: 1px 8px; }
+.chip--add {
+  border-style: dashed;
+  padding: 1px 8px;
+  font-size: 11px;
+  display: none;
+}
+.chip button {
+  border: 0; background: none; padding: 0 0 0 3px;
+  color: var(--muted); font-size: 13px; line-height: 1;
+}
+.chip button:hover { color: var(--danger); }
+
+/* ---------- list ---------- */
+
+.articles { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+
+/* Each article is a paving slab. */
+.article {
+  display: flex;
+  gap: 14px;
+  padding: 15px 16px;
+  background: var(--panel);
+  border: 1.5px solid var(--line-hard);
+  border-left: 7px solid var(--sage);
+  border-radius: var(--radius);
+  box-shadow: var(--slab);
+  transition: transform .1s, box-shadow .1s;
+}
+.article:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: var(--slab-lift);
+}
+.article .body { flex: 1; min-width: 0; }
+/* The spine carries archive status -- sage when the copy is safe, amber
+   while it is being fetched, red when it never landed. Status outranks read
+   state on specificity, which is the way round it should be. */
+.article[data-archive="pending"] { border-left-color: var(--warn); }
+.article[data-archive="failed"] { border-left-color: var(--danger); }
+
+/* Read items lie flush with the pavement. */
+.is-read {
+  background: transparent;
+  box-shadow: none;
+  border-color: var(--line);
+  border-left-color: var(--moss-deep);
+}
+.is-read:hover { transform: none; box-shadow: 2px 2px 0 var(--line); }
+
+/* The seal. Unread is an empty slot; read is stamped shut. */
+.toggle {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--moss-deep);
+  background: transparent;
+  box-shadow: 2px 2px 0 var(--sage);
+}
+.toggle:hover { background: var(--sage); }
+.is-read .toggle {
+  background: var(--moss);
+  border-color: var(--line-hard);
+  box-shadow: none;
+}
+
+.title {
+  color: var(--ink);
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.3;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.title:hover { color: var(--umber); text-decoration: none; }
+.is-read .title { color: var(--muted); font-weight: 400; font-style: italic; }
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+  margin-top: 6px;
+  color: var(--muted);
+}
+.meta .site { color: var(--moss-deep); text-transform: uppercase; }
+.meta .site:hover { color: var(--umber); }
+
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+/* The add-tag affordance only takes up space once you reach for it. */
+.article:hover .chip--add,
+.article:focus-within .chip--add { display: inline-flex; }
+
+.actions {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.article:hover .actions, .actions:focus-within { opacity: 1; }
+.actions a { color: var(--muted); text-transform: uppercase; }
+.actions a:hover { color: var(--umber); }
+.actions button {
+  border: 0; background: none; padding: 0;
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.actions button:hover { color: var(--danger); }
+
+/* Evidence stamps. The bad news is stamped crooked, in haste. */
+.pill {
+  padding: 2px 8px;
+  border: 1.5px solid var(--moss-deep);
+  border-radius: var(--radius);
+  background: var(--sage-soft);
+  color: var(--moss-deep);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+.pill--pending {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn);
+  border-style: dashed;
+}
+.pill--thin {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn);
+  cursor: help;
+  transform: rotate(-2deg);
+}
+.pill--failed {
+  background: transparent;
+  color: var(--danger);
+  border-color: var(--danger);
+  transform: rotate(-3deg);
+}
+
+.empty {
+  color: var(--muted);
+  padding: 48px 0;
+  text-align: center;
+  font-style: italic;
+  font-size: 16px;
+  color: var(--moss-deep);
+}
+
+/* ---------- reader ---------- */
+
+.reader { max-width: 680px; margin: 0 auto; }
+.crumbs { color: var(--moss-deep); margin: 22px 0 20px; text-transform: uppercase; }
+.reader h1 {
+  font-family: var(--serif);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -.015em;
+  margin: 0 0 12px;
+}
+
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--muted);
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--line-hard);
+  box-shadow: 0 3px 0 var(--sage);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  padding: 16px 0;
+  border-bottom: 2px solid var(--sage);
+}
+.toolbar form { display: inline; }
+.toolbar button {
+  padding: 6px 13px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+.toolbar button:hover { border-color: var(--umber); color: var(--umber); }
+.toolbar a {
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* The confession: why the archive is thin. */
+.notice {
+  background: var(--warn-soft);
+  color: var(--ink);
+  padding: 12px 14px;
+  margin: 18px 0;
+  border: 1.5px solid var(--warn);
+  border-left-width: 6px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  padding: 16px 0 20px;
+}
+.tag-editor input { padding: 5px 10px; font-size: 13px; min-width: 210px; flex: 1; }
+.tag-editor button[type=submit] {
+  padding: 5px 12px;
+  font-family: var(--stencil);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.prose {
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.72;
+  overflow-wrap: break-word;
+}
+/* First block sits flush against the rule above it. */
+.prose > *:first-child { margin-top: 0; }
+
+/* An illuminated opening. */
+.prose > p:first-of-type::first-letter {
+  float: left;
+  font-size: 3.4em;
+  line-height: .82;
+  font-weight: 700;
+  color: var(--umber);
+  padding: 4px 10px 0 0;
+}
+.prose h1, .prose h2, .prose h3 {
+  font-family: var(--serif);
+  line-height: 1.28;
+  margin: 1.7em 0 .5em;
+  letter-spacing: -.01em;
+}
+.prose h1 { font-size: 25px; }
+.prose h2 {
+  font-size: 22px;
+  border-bottom: 2px solid var(--sage);
+  padding-bottom: 5px;
+}
+.prose h3 { font-size: 19px; }
+.prose img {
+  max-width: 100%;
+  height: auto;
+  border: 1.5px solid var(--line-hard);
+  border-radius: var(--radius);
+  box-shadow: var(--slab);
+}
+.prose figure { margin: 1.8em 0; }
+.prose figcaption {
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 9px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.prose blockquote {
+  margin: 1.4em 0;
+  padding: 2px 0 2px 20px;
+  border-left: 4px solid var(--sage);
+  color: var(--muted);
+  font-style: italic;
+}
+.prose pre {
+  background: var(--panel);
+  border: 1.5px solid var(--line-hard);
+  border-radius: var(--radius);
+  box-shadow: var(--slab);
+  padding: 13px;
+  overflow-x: auto;
+  font-family: var(--stencil);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.prose code { font-family: var(--stencil); font-size: .88em; }
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  display: block;
+  overflow-x: auto;
+}
+.prose th, .prose td {
+  border: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: left;
+}
+.prose th {
+  background: var(--sage-soft);
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 48px 0 0;
+  padding-top: 22px;
+  border-top: 2px solid var(--moss-deep);
+}
+.notes label { color: var(--moss-deep); text-transform: uppercase; letter-spacing: .09em; }
+.notes textarea { line-height: 1.6; }
+.notes button {
+  align-self: flex-start;
+  padding: 7px 16px;
+  font-family: var(--stencil);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+/* ---------- bookmarklet page ---------- */
+
+.bookmarklet-drag {
+  display: inline-block;
+  padding: 11px 20px;
+  border: 1.5px solid var(--line-hard);
+  border-radius: var(--radius);
+  background: var(--umber);
+  color: #fcecd8;
+  font-family: var(--stencil);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  box-shadow: var(--slab);
+  cursor: grab;
+}
+.bookmarklet-drag:hover {
+  text-decoration: none;
+  transform: translate(-2px, -2px);
+  box-shadow: var(--slab-lift);
+}
+
+/* ---------- accommodations ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  .article:hover, .add button:hover, button.primary:hover,
+  .bookmarklet-drag:hover { transform: none; }
+}
+
+@media (max-width: 620px) {
+  .add { flex-wrap: wrap; }
+  /* Must match the attribute selectors above on specificity, or the
+     desktop flex ratios win and the row refuses to stack. */
+  .add input[type=url], .add input[type=text] { flex: 1 1 100%; }
+  .add button { width: 100%; }
+  .actions { opacity: 1; }
+  /* Wrap rather than force one line -- at ~320px the select's min-content
+     width and the search field can't share a row. */
+  .search { flex: 1 1 100%; flex-wrap: wrap; }
+  .search input { min-width: 0; flex: 1 1 180px; }
+  .search select { flex: 1 1 140px; }
+  .reader h1 { font-size: 27px; }
+  .prose { font-size: 17px; }
+}
+
+@media print {
+  body::before, .topbar, .toolbar, .tag-editor, .notes, .crumbs { display: none; }
+  body { background: #fff; color: #000; }
+  .prose { font-size: 12pt; }
+}
