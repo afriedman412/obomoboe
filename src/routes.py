@@ -379,10 +379,12 @@ def settings():
         stored = db.get_settings(conn)
         values: dict = {
             "LLM_TAGS_ENABLED": bool(request.form.get("llm_tags")),
-            "AUTO_APPLY_TAGS": bool(request.form.get("auto_apply")),
             "TAG_MODEL": ((request.form.get("tag_model") or "").strip()
                           or "claude-opus-5"),
         }
+        mode = request.form.get("tag_mode")
+        if mode in db.TAG_MODES:
+            values["TAG_MODE"] = mode
         try:
             count = int(request.form.get("suggestions", "6"))
             values["TAG_SUGGESTIONS"] = max(0, min(12, count))
@@ -408,6 +410,7 @@ def settings():
     return render_template(
         "settings.html",
         config=config,
+        modes=db.TAG_MODES,
         masked_key=_mask(key),
         key_from_env=bool(os.environ.get("ANTHROPIC_API_KEY"))
         and not db.get_settings(conn).get("ANTHROPIC_API_KEY"),

@@ -331,20 +331,33 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
 # --------------------------------------------------------------------------
 
 # What the settings page may write, and what each becomes in the app config.
-SETTING_KEYS = ("ANTHROPIC_API_KEY", "LLM_TAGS_ENABLED", "AUTO_APPLY_TAGS",
+SETTING_KEYS = ("ANTHROPIC_API_KEY", "LLM_TAGS_ENABLED", "TAG_MODE",
                 "TAG_MODEL", "TAG_SUGGESTIONS")
 
-BOOL_SETTINGS = ("LLM_TAGS_ENABLED", "AUTO_APPLY_TAGS")
+BOOL_SETTINGS = ("LLM_TAGS_ENABLED",)
 INT_SETTINGS = ("TAG_SUGGESTIONS",)
+
+# What to do with the tags an article suggests.
+TAG_OFF = "off"          # do not work them out at all
+TAG_SUGGEST = "suggest"  # offer them; you accept the ones you want
+TAG_APPLY = "apply"      # file them for you
+TAG_MODES = (TAG_OFF, TAG_SUGGEST, TAG_APPLY)
 
 
 def get_settings(conn: sqlite3.Connection) -> dict[str, Any]:
     """Stored settings, typed. Absent keys are simply missing, so a caller
     can tell "never set" from "set to off"."""
     rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    stored = {row["key"]: row["value"] for row in rows}
     out: dict[str, Any] = {}
-    for row in rows:
-        key, raw = row["key"], row["value"]
+
+    # The three-way mode replaced an auto-apply switch; carry the old value
+    # over rather than silently resetting anyone who had set it.
+    if "TAG_MODE" not in stored and "AUTO_APPLY_TAGS" in stored:
+        out["TAG_MODE"] = (TAG_APPLY if stored["AUTO_APPLY_TAGS"] == "1"
+                           else TAG_SUGGEST)
+
+    for key, raw in stored.items():
         if key not in SETTING_KEYS:
             continue
         if key in BOOL_SETTINGS:
@@ -354,6 +367,9 @@ def get_settings(conn: sqlite3.Connection) -> dict[str, Any]:
                 out[key] = int(raw)
             except ValueError:
                 continue
+        elif key == "TAG_MODE":
+            if raw in TAG_MODES:
+                out[key] = raw
         elif raw != "":
             out[key] = raw
     return out
@@ -364,13 +380,15 @@ def set_settings(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
         if key not in SETTING_KEYS:
             continue
         if key in BOOL_SETTINGS:
-            stored = "1" if value else "0"
+            stored_value = "1" if value else "0"
+        elif key == "TAG_MODE" and value not in TAG_MODES:
+            continue
         else:
-            stored = "" if value is None else str(value)
+            stored_value = "" if value is None else str(value)
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, stored),
+            (key, stored_value),
         )
     conn.commit()
 

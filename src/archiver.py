@@ -127,6 +127,10 @@ def _apply_tags(config: dict[str, Any], conn: Any, article_id: int,
     Never fatal: a tagging failure must not cost you the archive, which is
     the part that cannot be recreated later.
     """
+    mode = config.get("TAG_MODE", db.TAG_SUGGEST)
+    if mode == db.TAG_OFF:
+        return
+
     try:
         candidates = tagging.suggest(config, result.html, result.text,
                                      result.title)
@@ -136,7 +140,7 @@ def _apply_tags(config: dict[str, Any], conn: Any, article_id: int,
     if not candidates:
         return
 
-    if config.get("AUTO_APPLY_TAGS"):
+    if mode == db.TAG_APPLY:
         for name in candidates:
             db.add_tag(conn, article_id, name)
         db.set_suggestions(conn, article_id, [])

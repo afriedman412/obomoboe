@@ -13,14 +13,34 @@
         publisher declared plus the words the text leans on. That part needs
         no key and works offline.</p>
 
+      {% set mode = config.TAG_MODE or 'suggest' %}
       <label class="row">
-        <input type="checkbox" name="auto_apply"
-               {{ 'checked' if config.AUTO_APPLY_TAGS }}>
+        <input type="radio" name="tag_mode" value="off"
+               {{ 'checked' if mode == 'off' }}>
         <span>
-          <strong>Apply tags automatically</strong>
-          <em>Off by default: tags are offered on each article and you accept
-            the ones you want. Turned on, they are filed for you &mdash; quicker,
-            but your tag list fills up with whatever the pages say.</em>
+          <strong>Off</strong>
+          <em>No tags are worked out at all. Tag by hand as before.</em>
+        </span>
+      </label>
+
+      <label class="row">
+        <input type="radio" name="tag_mode" value="suggest"
+               {{ 'checked' if mode == 'suggest' }}>
+        <span>
+          <strong>Auto-suggest</strong>
+          <em>Candidates are offered on each article and you keep the ones you
+            want. Your tag list only holds what you chose.</em>
+        </span>
+      </label>
+
+      <label class="row">
+        <input type="radio" name="tag_mode" value="apply"
+               {{ 'checked' if mode == 'apply' }}>
+        <span>
+          <strong>Auto-apply</strong>
+          <em>Tags are filed for you as articles land &mdash; quicker, but your
+            tag list fills up with whatever the pages say, and removing them
+            is one at a time.</em>
         </span>
       </label>
 

@@ -53,7 +53,8 @@ def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         # Tagging. Everything here is overridable from the settings page;
         # these are the defaults it starts from.
         "TAG_SUGGESTIONS": _env_int("OBOMOBOE_TAG_SUGGESTIONS", 6),
-        "AUTO_APPLY_TAGS": _env_bool("OBOMOBOE_AUTO_APPLY_TAGS", False),
+        # off | suggest | apply -- see db.TAG_MODES.
+        "TAG_MODE": os.environ.get("OBOMOBOE_TAG_MODE", "suggest"),
         "LLM_TAGS_ENABLED": _env_bool("OBOMOBOE_LLM_TAGS", True),
         "TAG_MODEL": os.environ.get("OBOMOBOE_TAG_MODEL", "claude-opus-5"),
         "LLM_TAG_CHARS": _env_int("OBOMOBOE_LLM_TAG_CHARS", 6000),

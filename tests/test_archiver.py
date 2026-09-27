@@ -214,3 +214,48 @@ class TestDoesNotDegradeGoodArchive:
         text = (archiver.article_dir(config, article_id) / "article.txt").read_text()
         assert "Sentence 1" in text
         assert "Enable JavaScript" not in text
+
+
+class TestTagModes:
+    """off / suggest / apply, the three ways an article can be tagged."""
+
+    def _archive(self, config, conn, monkeypatch, mode):
+        config["TAG_MODE"] = mode
+        config["LLM_TAGS_ENABLED"] = False
+        article_id = make_article(conn, url=f"https://example.com/{mode}")
+        monkeypatch.setattr(
+            archiver, "fetch",
+            lambda url, ua, timeout, session=None:
+                extract_mod.Fetched(FULL_PAGE, 200, url, {}))
+        archiver.archive_article(config, article_id)
+        row = db.get_article(conn, article_id)
+        return (db.tags_for_articles(conn, [article_id]).get(article_id, []),
+                db.get_suggestions(row))
+
+    def test_off_produces_nothing(self, config, conn, monkeypatch):
+        tags, suggestions = self._archive(config, conn, monkeypatch, "off")
+        assert tags == [] and suggestions == []
+
+    def test_suggest_offers_without_filing(self, config, conn, monkeypatch):
+        tags, suggestions = self._archive(config, conn, monkeypatch, "suggest")
+        assert tags == [], "suggest mode must not apply tags"
+        assert suggestions, "suggest mode must offer something"
+
+    def test_apply_files_them_and_leaves_nothing_pending(
+            self, config, conn, monkeypatch):
+        tags, suggestions = self._archive(config, conn, monkeypatch, "apply")
+        assert tags, "apply mode must file tags"
+        assert suggestions == [], "applied tags must not also be suggested"
+
+    def test_default_is_suggest(self, config, conn, monkeypatch):
+        config.pop("TAG_MODE", None)
+        config["LLM_TAGS_ENABLED"] = False
+        article_id = make_article(conn, url="https://example.com/default")
+        monkeypatch.setattr(
+            archiver, "fetch",
+            lambda url, ua, timeout, session=None:
+                extract_mod.Fetched(FULL_PAGE, 200, url, {}))
+        archiver.archive_article(config, article_id)
+        row = db.get_article(conn, article_id)
+        assert db.get_suggestions(row)
+        assert db.tags_for_articles(conn, [article_id]).get(article_id, []) == []

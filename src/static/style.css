@@ -322,7 +322,8 @@ button.danger:hover { background: var(--danger); color: var(--paper); }
 .settings .row--inline span { min-width: 165px; }
 .settings .row--inline input { flex: 1; max-width: 340px; }
 .settings .row--sub { margin: -8px 0 16px 0; font-size: 13px; }
-.settings .row input[type=checkbox] {
+.settings .row input[type=checkbox],
+.settings .row input[type=radio] {
   margin-top: 3px;
   width: 17px;
   height: 17px;

@@ -89,10 +89,17 @@ candidates into something closer to how you would file it. It is entirely
 optional — without a key the offline tags carry on working, and if the call
 fails the article still archives with them.
 
-Tags are **suggested, not applied**: they appear as dashed chips on the
-article and in the list, and clicking one keeps it. Your taxonomy stays
-yours. Turn on *Apply tags automatically* in settings if you would rather
-they were filed for you.
+Three modes, set at `/settings`:
+
+| mode | what happens |
+| --- | --- |
+| **off** | no tags are worked out at all |
+| **auto-suggest** *(default)* | candidates appear as dashed chips on the article and in the list; clicking one keeps it |
+| **auto-apply** | tags are filed for you as articles land |
+
+The default is auto-suggest because your tag list then holds only what you
+chose. Auto-apply is quicker, but it fills up with whatever the pages say and
+removing them is one at a time.
 
 Configure all of it at `/settings` — the key, the toggles, how many
 suggestions per article, and which model. The key is stored in plain text in
@@ -115,8 +122,8 @@ The article page then offers a link that opens archive.today so you can create
 the snapshot by hand; hit **re-archive** afterwards and it will pick it up.
 
 Configuration is via environment variables: `OBOMOBOE_PORT`,
-`OBOMOBOE_MAX_CAPTURE_BYTES` (default 12MB), `OBOMOBOE_AUTO_APPLY_TAGS`,
-`OBOMOBOE_TAG_MODEL`, `OBOMOBOE_TAG_SUGGESTIONS`, `OBOMOBOE_LLM_TAGS=0`,
+`OBOMOBOE_MAX_CAPTURE_BYTES` (default 12MB),
+`OBOMOBOE_TAG_MODE` (`off`/`suggest`/`apply`), `OBOMOBOE_TAG_MODEL`, `OBOMOBOE_TAG_SUGGESTIONS`, `OBOMOBOE_LLM_TAGS=0`,
 `OBOMOBOE_DATA_DIR`, `OBOMOBOE_MIN_WORDS` (paywall threshold, default 200),
 `OBOMOBOE_ARCHIVE_PH=0` to disable the fallback, `OBOMOBOE_ARCHIVE_IMAGES=0` to
 skip image downloads, `OBOMOBOE_WORKERS`.

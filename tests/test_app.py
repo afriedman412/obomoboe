@@ -315,17 +315,35 @@ class TestOriginalLinkOnPage:
 class TestSettingsPage:
     def test_defaults_are_conservative(self, client):
         page = client.get("/settings").get_data(as_text=True)
-        assert "Apply tags automatically" in page
-        # Auto-apply must be off unless the user turns it on.
+        for label in ("Off", "Auto-suggest", "Auto-apply"):
+            assert f">{label}<" in page
         assert "Claude tagging is off" in page
 
     def test_saving_toggles_round_trips(self, client, conn):
-        client.post("/settings", data={"auto_apply": "on", "llm_tags": "on",
+        client.post("/settings", data={"tag_mode": "apply", "llm_tags": "on",
                                        "suggestions": "4",
                                        "tag_model": "claude-opus-5"})
         stored = db.get_settings(conn)
-        assert stored["AUTO_APPLY_TAGS"] is True
+        assert stored["TAG_MODE"] == "apply"
         assert stored["TAG_SUGGESTIONS"] == 4
+
+    def test_each_mode_round_trips(self, client, conn):
+        for mode in ("off", "suggest", "apply"):
+            client.post("/settings", data={"tag_mode": mode})
+            assert db.get_settings(conn)["TAG_MODE"] == mode
+
+    def test_a_bogus_mode_is_ignored(self, client, conn):
+        client.post("/settings", data={"tag_mode": "suggest"})
+        client.post("/settings", data={"tag_mode": "delete-everything"})
+        assert db.get_settings(conn)["TAG_MODE"] == "suggest"
+
+    def test_the_old_auto_apply_setting_is_carried_over(self, conn):
+        """The three-way mode replaced a boolean; anyone who had set it
+        should not be silently reset."""
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)",
+                     ("AUTO_APPLY_TAGS", "1"))
+        conn.commit()
+        assert db.get_settings(conn)["TAG_MODE"] == "apply"
 
     def test_api_key_is_stored_and_shown_masked(self, client, conn):
         client.post("/settings", data={"api_key": "sk-ant-secret-value-1234"})
