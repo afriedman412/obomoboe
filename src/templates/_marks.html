@@ -1,0 +1,27 @@
+{# How complete the archive is, as a mark rather than a sentence.
+
+   The shapes read as a sequence: an empty ring while nothing is saved, a
+   half-filled one when only part of the article came through, a solid seal
+   when it is all there. Source is carried by the solid shapes -- a plain
+   seal fetched, a window captured from your browser, two rings for a copy
+   of a copy from archive.today.
+
+   Every one carries the sentence it replaced as its label, so it is still
+   readable on hover and to a screen reader. #}
+
+{% macro archive_mark(status, source, error, role='') -%}
+  {%- set thin = status == 'ok' and error -%}
+  {%- set state = 'thin' if thin else status -%}
+  {%- set words = {'pending': 'Archiving…', 'ok': 'Archived',
+                   'failed': 'Archive failed', 'thin': 'Partial archive'} -%}
+  {%- set via = {'archive.today': ' via archive.today',
+                 'browser': ' via your browser'}.get(source, '') -%}
+  {%- set label = words[state] ~ via -%}
+  <span class="mark mark--{{ state }}"
+        data-mark="{{ state }}"
+        data-source="{{ source or 'direct' }}"
+        {% if role %}data-role="{{ role }}"{% endif %}
+        role="img"
+        aria-label="{{ label }}"
+        title="{{ label }}{% if error %} — {{ error }}{% endif %}"></span>
+{%- endmacro %}

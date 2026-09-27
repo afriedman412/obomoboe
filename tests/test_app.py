@@ -459,6 +459,26 @@ class TestRemovableTagsFromTheList:
         page = client.get("/").get_data(as_text=True)
         assert 'data-action="commit-removals"' in page
 
+    def test_dismiss_comes_after_every_chip(self, client, conn):
+        """It acts on the whole row, so it reads last rather than splitting
+        the applied tags from the suggested ones."""
+        article_id = self._row(conn, tags=["applied"], suggestions=["offered"])
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        row = soup.select_one('.article[data-id="%d"] .tags' % article_id)
+        order = [b.get("data-action") for b in row.find_all("button")
+                 if b.get("data-action")]
+        assert order.index("commit-removals") > order.index("toggle-remove")
+        assert order.index("commit-removals") > order.index("accept-suggestion")
+
+    def test_dismiss_still_submits_the_removal_form(self, client, conn):
+        """Placed outside that form, it stays wired to it by id."""
+        article_id = self._row(conn, tags=["x"])
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        button = soup.select_one('[data-action="commit-removals"]')
+        form = soup.select_one("#" + button["form"])
+        assert form is not None
+        assert form["action"].endswith(f"/a/{article_id}/tags")
+
     def test_tags_post_back_without_javascript(self, client, conn):
         """Each chip is a submit button in a real form, so removal works with
         scripting off -- immediately, rather than staged."""
@@ -499,3 +519,53 @@ class TestListStatusButton:
         assert "mark read" in client.get("/").get_data(as_text=True)
         db.set_status(conn, article_id, db.READ)
         assert "mark unread" in client.get("/").get_data(as_text=True)
+
+
+class TestArchiveMarks:
+    """The status pills are marks now; the sentence they replaced has to
+    survive as the accessible label."""
+
+    def _article(self, conn, status, source=None, error=None):
+        article_id = db.insert_article(conn, url=f"https://e.example/{status}",
+                                       original_url=f"https://e.example/{status}")
+        db.update_article(conn, article_id, title="Piece",
+                          archive_status=status, archive_source=source,
+                          archive_error=error)
+        return article_id
+
+    def _mark(self, client, article_id):
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        return soup.select_one(f'.article[data-id="{article_id}"] .mark')
+
+    def test_each_state_is_labelled_in_words(self, client, conn):
+        cases = [
+            ("pending", None, None, "Archiving"),
+            ("ok", "direct", None, "Archived"),
+            ("failed", None, None, "Archive failed"),
+        ]
+        for status, source, error, expected in cases:
+            article_id = self._article(conn, status, source, error)
+            mark = self._mark(client, article_id)
+            assert expected in mark["aria-label"]
+
+    def test_source_is_named_not_just_drawn(self, client, conn):
+        article_id = self._article(conn, "ok", "browser")
+        mark = self._mark(client, article_id)
+        assert mark["aria-label"] == "Archived via your browser"
+        assert mark["data-source"] == "browser"
+
+    def test_a_thin_archive_reads_as_partial(self, client, conn):
+        article_id = self._article(conn, "ok", "direct", "only got 28 words")
+        mark = self._mark(client, article_id)
+        assert mark["data-mark"] == "thin"
+        assert "Partial archive" in mark["aria-label"]
+
+    def test_the_reason_stays_available_on_hover(self, client, conn):
+        article_id = self._article(conn, "failed", None, "archive.today said no")
+        assert "archive.today said no" in self._mark(client, article_id)["title"]
+
+    def test_the_article_page_marks_it_too(self, client, conn):
+        article_id = self._article(conn, "ok", "browser")
+        soup = BeautifulSoup(
+            client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        assert soup.select_one(".byline .mark")["data-source"] == "browser"

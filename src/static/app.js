@@ -3,10 +3,15 @@
 (function () {
   "use strict";
 
-  var PILL_LABELS = {
-    pending: "archiving...",
-    ok: "archived",
-    failed: "archive failed"
+  var MARK_LABELS = {
+    pending: "Archiving\u2026",
+    ok: "Archived",
+    failed: "Archive failed",
+    thin: "Partial archive"
+  };
+  var MARK_VIA = {
+    "archive.today": " via archive.today",
+    browser: " via your browser"
   };
 
   function post(url, data) {
@@ -126,8 +131,7 @@
   }
 
   function renderTags(item, tags) {
-    var form = item.querySelector(".tagform");
-    var commit = form.querySelector('[data-action="commit-removals"]');
+    var form = item.querySelector('[data-role="tag-form"]');
     /* Anything still marked stays marked across a re-render. */
     var marked = {};
     form.querySelectorAll(".chip--removing").forEach(function (chip) {
@@ -147,7 +151,7 @@
       chip.dataset.tag = name;
       chip.title = "Click to mark for removal";
       chip.textContent = name;
-      form.insertBefore(chip, commit);
+      form.appendChild(chip);
     });
   }
 
@@ -178,13 +182,19 @@
           if (article.archive_status === "pending") { stillWaiting = true; return; }
 
           item.dataset.archive = article.archive_status;
-          var pill = item.querySelector('[data-role="archive-pill"]');
-          if (pill) {
+          var mark = item.querySelector('[data-role="archive-mark"]');
+          if (mark) {
             var thin = article.archive_status === "ok" && article.archive_error;
-            pill.className = "pill pill--" + (thin ? "thin" : article.archive_status);
-            pill.textContent = (thin ? "partial" : PILL_LABELS[article.archive_status])
-              + (article.archive_source === "archive.today" ? " via archive.today" : "");
-            pill.title = article.archive_error || "";
+            var state = thin ? "thin" : article.archive_status;
+            var label = MARK_LABELS[state]
+              + (MARK_VIA[article.archive_source] || "");
+            /* The shape itself lives in CSS; only the state changes here. */
+            mark.className = "mark mark--" + state;
+            mark.dataset.mark = state;
+            mark.dataset.source = article.archive_source || "direct";
+            mark.setAttribute("aria-label", label);
+            mark.title = label
+              + (article.archive_error ? " \u2014 " + article.archive_error : "");
           }
           var title = item.querySelector(".title");
           if (title && article.title) title.textContent = article.title;

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_marks.html" import archive_mark %}
 
 {# '=' means "keep whatever the page is already filtered by" #}
 {% macro querylink(new_status='=', new_tag='=') -%}
@@ -85,20 +86,14 @@
         <span>added {{ a.added_at | humandate }}</span>
         {% if a.word_count %}<span>{{ a.word_count }} words</span>{% endif %}
         {% if a.published_at %}<span>pub. {{ a.published_at | humandate }}</span>{% endif %}
-        {% set thin = a.archive_status == 'ok' and a.archive_error %}
-        <span class="pill pill--{{ 'thin' if thin else a.archive_status }}"
-              data-role="archive-pill" title="{{ a.archive_error or '' }}">
-          {%- if thin %}partial
-          {%- else %}{{ {'pending': 'archiving...', 'ok': 'archived',
-                         'failed': 'archive failed'}[a.archive_status] }}
-          {%- endif %}
-          {%- if a.archive_source == 'archive.today' %} via archive.today{% elif a.archive_source == 'browser' %} via your browser{% endif %}
-        </span>
+        {{ archive_mark(a.archive_status, a.archive_source,
+                         a.archive_error, role="archive-mark") }}
       </div>
       <div class="tags" data-role="tags">
         {# Real forms so a click still works with JS off, where it removes
            straight away rather than staging. #}
-        <form class="tagform" method="post"
+        <form class="tagform" data-role="tag-form" id="tagform-{{ a.id }}"
+              method="post"
               action="{{ url_for('main.edit_tags', article_id=a.id) }}">
           {% for name in a.tags %}
             <button class="chip chip--sm" type="submit" name="remove"
@@ -106,10 +101,6 @@
                     data-tag="{{ name }}"
                     title="Click to mark for removal">{{ name }}</button>
           {% endfor %}
-          <button class="dismiss" type="submit" name="dismiss" value="1"
-                  data-action="commit-removals"
-                  title="Remove marked tags, drop unkept suggestions"
-                  >dismiss</button>
         </form>
 
         <form class="tagform" method="post"
@@ -121,6 +112,14 @@
                     title="Suggested — click to keep">{{ name }} +</button>
           {% endfor %}
         </form>
+
+        {# Sits after every chip, but submits the removal form above it --
+           that is what the form attribute is for, and it keeps the reading
+           and tab order matching what you see. #}
+        <button class="dismiss" type="submit" form="tagform-{{ a.id }}"
+                name="dismiss" value="1" data-action="commit-removals"
+                title="Remove marked tags, drop unkept suggestions"
+                >dismiss</button>
 
         <button class="chip chip--add" type="button" data-action="add-tag">+ tag</button>
       </div>

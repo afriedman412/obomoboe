@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_marks.html" import archive_mark %}
 {% block title %}{{ article.title or article.url }}{% endblock %}
 
 {% block content %}
@@ -16,14 +17,8 @@
         {{ article.published_at | humantime }}</span>
     {% endif %}
     {% if article.word_count %}<span>{{ article.word_count }} words</span>{% endif %}
-    {% set thin = article.archive_status == 'ok' and article.archive_error %}
-    <span class="pill pill--{{ 'thin' if thin else article.archive_status }}">
-      {%- if thin %}partial
-      {%- else %}{{ {'pending': 'archiving...', 'ok': 'archived',
-                     'failed': 'archive failed'}[article.archive_status] }}
-      {%- endif %}
-      {%- if article.archive_source == 'archive.today' %} via archive.today{% elif article.archive_source == 'browser' %} via your browser{% endif %}
-    </span>
+    {{ archive_mark(article.archive_status, article.archive_source,
+                     article.archive_error) }}
   </div>
 
   <p class="source">
