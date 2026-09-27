@@ -266,6 +266,22 @@ button.danger:hover { background: var(--danger); color: var(--paper); }
   color: var(--moss-deep);
 }
 
+/* Sits with the suggestion chips in the list, quieter than any of them --
+   it removes things, so it should not be the easiest thing to hit. */
+.dismiss {
+  border: 0;
+  background: none;
+  padding: 1px 4px;
+  font-family: var(--stencil);
+  font-size: 10.5px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: .7;
+}
+.dismiss:hover { color: var(--danger); opacity: 1; }
+.dismiss[disabled] { opacity: .4; }
+
 .suggestions {
   display: flex;
   flex-wrap: wrap;

@@ -369,3 +369,47 @@ class TestSettingsPage:
     def test_suggestion_count_is_clamped(self, client, conn):
         client.post("/settings", data={"suggestions": "999"})
         assert db.get_settings(conn)["TAG_SUGGESTIONS"] == 12
+
+
+class TestDismissFromTheList:
+    def _article_with_suggestions(self, conn, names):
+        article_id = db.insert_article(conn, url="https://e.example/s",
+                                       original_url="https://e.example/s")
+        db.update_article(conn, article_id, title="Piece")
+        db.set_suggestions(conn, article_id, names)
+        return article_id
+
+    def test_dismiss_clears_what_is_still_on_offer(self, client, conn):
+        article_id = self._article_with_suggestions(conn, ["one", "two"])
+        resp = client.post(f"/a/{article_id}/suggestions/dismiss",
+                           headers={"X-Requested-With": "XMLHttpRequest"})
+        assert resp.status_code == 200
+        assert db.get_suggestions(db.get_article(conn, article_id)) == []
+
+    def test_dismiss_leaves_accepted_tags_alone(self, client, conn):
+        article_id = self._article_with_suggestions(conn, ["keeper", "junk"])
+        client.post(f"/a/{article_id}/suggestions/accept", data={"tag": "keeper"},
+                    headers={"X-Requested-With": "XMLHttpRequest"})
+        client.post(f"/a/{article_id}/suggestions/dismiss",
+                    headers={"X-Requested-With": "XMLHttpRequest"})
+        tags = db.tags_for_articles(conn, [article_id])[article_id]
+        assert tags == ["keeper"]
+        assert db.get_suggestions(db.get_article(conn, article_id)) == []
+
+    def test_the_button_is_on_the_list_only_while_there_is_something_to_drop(
+            self, client, conn):
+        article_id = self._article_with_suggestions(conn, ["one"])
+        assert 'data-action="dismiss-suggestions"' in \
+            client.get("/").get_data(as_text=True)
+        client.post(f"/a/{article_id}/suggestions/dismiss",
+                    headers={"X-Requested-With": "XMLHttpRequest"})
+        assert 'data-action="dismiss-suggestions"' not in \
+            client.get("/").get_data(as_text=True)
+
+    def test_accepting_reports_what_is_left(self, client, conn):
+        """The list uses this to know when to drop the dismiss button."""
+        article_id = self._article_with_suggestions(conn, ["only"])
+        resp = client.post(f"/a/{article_id}/suggestions/accept",
+                           data={"tag": "only"},
+                           headers={"X-Requested-With": "XMLHttpRequest"})
+        assert resp.get_json()["suggestions"] == []

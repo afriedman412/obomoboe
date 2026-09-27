@@ -53,6 +53,20 @@
         .then(function (data) {
           trigger.remove();
           renderTags(item, data.tags);
+          if (!data.suggestions.length) dropDismiss(item);
+        })
+        .catch(function () { trigger.disabled = false; });
+    }
+
+    /* Clears whatever is still on offer, keeping anything already accepted. */
+    if (trigger.dataset.action === "dismiss-suggestions") {
+      trigger.disabled = true;
+      post("/a/" + id + "/suggestions/dismiss", {})
+        .then(function () {
+          item.querySelectorAll(".chip--suggest").forEach(function (chip) {
+            chip.remove();
+          });
+          dropDismiss(item);
         })
         .catch(function () { trigger.disabled = false; });
     }
@@ -80,6 +94,11 @@
       if (event.key === "Escape") finish(false);
     });
     input.addEventListener("blur", function () { finish(true); });
+  }
+
+  function dropDismiss(item) {
+    var button = item.querySelector('[data-action="dismiss-suggestions"]');
+    if (button) button.remove();
   }
 
   function renderTags(item, tags) {

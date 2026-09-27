@@ -104,6 +104,10 @@
                   data-action="accept-suggestion" data-tag="{{ name }}"
                   title="Suggested — click to keep">{{ name }} +</button>
         {% endfor %}
+        {% if a.suggestions %}
+          <button class="dismiss" type="button" data-action="dismiss-suggestions"
+                  title="Drop the suggestions you haven't kept">dismiss</button>
+        {% endif %}
         <button class="chip chip--add" type="button" data-action="add-tag">+ tag</button>
       </div>
     </div>
