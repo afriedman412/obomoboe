@@ -58,6 +58,7 @@ CHALLENGE_MARKUP = (
     "px-captcha",                    # PerimeterX captcha page, not its sensor
     "queue-it.net",                  # Queue-it waiting room
     "bm-verify",                     # Akamai challenge body
+    "cf-error",                      # Cloudflare block page (error 1020 etc.)
 )
 
 # Only consulted when nothing above matched, and only near the top of the
