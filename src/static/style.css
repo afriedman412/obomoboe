@@ -287,22 +287,6 @@ button.chip { cursor: pointer; font-family: var(--stencil); }
   color: var(--moss-deep);
 }
 
-/* Sits with the suggestion chips in the list, quieter than any of them --
-   it removes things, so it should not be the easiest thing to hit. */
-.dismiss {
-  border: 0;
-  background: none;
-  padding: 1px 4px;
-  font-family: var(--stencil);
-  font-size: 10.5px;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-  color: var(--muted);
-  opacity: .7;
-}
-.dismiss:hover { color: var(--danger); opacity: 1; }
-.dismiss[disabled] { opacity: .4; }
-
 .suggestions {
   display: flex;
   flex-wrap: wrap;
@@ -499,6 +483,9 @@ button.chip { cursor: pointer; font-family: var(--stencil); }
   transition: opacity .12s;
 }
 .article:hover .actions, .actions:focus-within { opacity: 1; }
+/* If something is marked for removal, show the control that commits it --
+   otherwise the way to finish is hidden until you happen to hover. */
+.article:has(.chip--removing) .actions { opacity: 1; }
 .actions a { color: var(--muted); text-transform: uppercase; }
 .actions a:hover { color: var(--umber); }
 .actions button {

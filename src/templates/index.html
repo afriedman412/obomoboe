@@ -113,14 +113,6 @@
           {% endfor %}
         </form>
 
-        {# Sits after every chip, but submits the removal form above it --
-           that is what the form attribute is for, and it keeps the reading
-           and tab order matching what you see. #}
-        <button class="dismiss" type="submit" form="tagform-{{ a.id }}"
-                name="dismiss" value="1" data-action="commit-removals"
-                title="Remove marked tags, drop unkept suggestions"
-                >dismiss</button>
-
         <button class="chip chip--add" type="button" data-action="add-tag">+ tag</button>
       </div>
     </div>
@@ -134,6 +126,12 @@
         <button type="submit" data-action="toggle" data-role="status-label"
           >mark {{ 'unread' if a.status == 'read' else 'read' }}</button>
       </form>
+      {# Lives here rather than among the chips, but still submits the tag
+         form in the row -- the form attribute keeps them connected. #}
+      <button type="submit" form="tagform-{{ a.id }}" name="dismiss" value="1"
+              data-action="commit-removals"
+              title="Remove marked tags, drop unkept suggestions"
+              >dismiss</button>
       <button type="button" data-action="delete">delete</button>
     </div>
   </li>

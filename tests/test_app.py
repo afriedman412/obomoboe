@@ -459,16 +459,14 @@ class TestRemovableTagsFromTheList:
         page = client.get("/").get_data(as_text=True)
         assert 'data-action="commit-removals"' in page
 
-    def test_dismiss_comes_after_every_chip(self, client, conn):
-        """It acts on the whole row, so it reads last rather than splitting
-        the applied tags from the suggested ones."""
+    def test_dismiss_sits_with_the_row_actions_not_among_the_chips(
+            self, client, conn):
+        """It is a control for the row, not another tag to read past."""
         article_id = self._row(conn, tags=["applied"], suggestions=["offered"])
         soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
-        row = soup.select_one('.article[data-id="%d"] .tags' % article_id)
-        order = [b.get("data-action") for b in row.find_all("button")
-                 if b.get("data-action")]
-        assert order.index("commit-removals") > order.index("toggle-remove")
-        assert order.index("commit-removals") > order.index("accept-suggestion")
+        row = soup.select_one(f'.article[data-id="{article_id}"]')
+        assert row.select_one('.tags [data-action="commit-removals"]') is None
+        assert row.select_one('.actions [data-action="commit-removals"]')
 
     def test_dismiss_still_submits_the_removal_form(self, client, conn):
         """Placed outside that form, it stays wired to it by id."""
