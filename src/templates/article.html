@@ -27,6 +27,15 @@
        rel="noreferrer noopener">{{ article.original_url }}</a>
   </p>
 
+  {# When it entered the list and when you finished it -- your history with
+     the piece, kept apart from the byline, which describes the piece. #}
+  <p class="logged">
+    <span>added {{ article.added_at | humantime }}</span>
+    {% if article.read_at %}
+      <span class="logged__read">read {{ article.read_at | humantime }}</span>
+    {% endif %}
+  </p>
+
   <div class="toolbar">
     <form method="post" action="{{ url_for('main.set_status', article_id=article.id) }}">
       <input type="hidden" name="status"

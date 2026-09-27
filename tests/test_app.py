@@ -567,3 +567,34 @@ class TestArchiveMarks:
         soup = BeautifulSoup(
             client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
         assert soup.select_one(".byline .mark")["data-source"] == "browser"
+
+
+class TestReadingDates:
+    def test_added_date_is_on_the_article_page(self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/d",
+                                       original_url="https://e.example/d")
+        db.update_article(conn, article_id, title="Piece")
+        page = client.get(f"/a/{article_id}").get_data(as_text=True)
+        assert "added" in page.lower()
+
+    def test_read_date_appears_only_once_read(self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/d2",
+                                       original_url="https://e.example/d2")
+        db.update_article(conn, article_id, title="Piece")
+        soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        assert soup.select_one(".logged__read") is None, "unread piece claims a read date"
+
+        db.set_status(conn, article_id, db.READ)
+        soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        assert "read" in soup.select_one(".logged__read").get_text().lower()
+
+    def test_marking_unread_clears_the_read_date(self, client, conn):
+        """set_status already nulls read_at; the page must not keep showing it."""
+        article_id = db.insert_article(conn, url="https://e.example/d3",
+                                       original_url="https://e.example/d3")
+        db.set_status(conn, article_id, db.READ)
+        assert db.get_article(conn, article_id)["read_at"]
+        db.set_status(conn, article_id, db.UNREAD)
+        assert db.get_article(conn, article_id)["read_at"] is None
+        soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        assert soup.select_one(".logged__read") is None

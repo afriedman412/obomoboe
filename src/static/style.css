@@ -608,6 +608,20 @@ button.chip { cursor: pointer; font-family: var(--stencil); }
 .source a { color: var(--moss-deep); }
 .source a:hover { color: var(--umber); }
 
+/* Your history with the article, not the article's own facts. */
+.logged {
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 6px 0 0;
+}
+.logged__read { color: var(--moss-deep); }
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
