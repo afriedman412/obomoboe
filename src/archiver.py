@@ -29,7 +29,7 @@ from .extract import (Extracted, FetchError, dump_metadata, extract, fetch,
 
 log = logging.getLogger(__name__)
 
-_queue: "queue.Queue[tuple[dict[str, Any], int, bool]]" = queue.Queue()
+_queue: "queue.Queue[tuple[dict[str, Any], int, bool, bool]]" = queue.Queue()
 _workers_started = threading.Event()
 
 # Article ids currently queued or being archived. Two re-archives of the same
@@ -49,8 +49,17 @@ def article_dir(config: dict[str, Any], article_id: int) -> Path:
 # --------------------------------------------------------------------------
 
 
+CAPTURE_NAME = "captured.html"
+
+
+def capture_path(config: dict[str, Any], article_id: int) -> Path:
+    """Where a page sent from the browser is parked for the worker."""
+    return article_dir(config, article_id) / CAPTURE_NAME
+
+
 def archive_article(config: dict[str, Any], article_id: int,
-                    force_archive_ph: bool = False) -> dict[str, Any]:
+                    force_archive_ph: bool = False,
+                    from_capture: bool = False) -> dict[str, Any]:
     """Fetch, extract, and write an article to disk. Updates the DB row."""
     conn = db.connect(config["DB_PATH"])
     try:
@@ -62,7 +71,8 @@ def archive_article(config: dict[str, Any], article_id: int,
         db.update_article(conn, article_id, archive_status=db.PENDING,
                           archive_error=None)
 
-        result, note = _retrieve(config, url, force_archive_ph)
+        result, note = _retrieve(config, url, force_archive_ph,
+                                 article_id if from_capture else None)
         if result is None:
             db.update_article(conn, article_id, archive_status=db.FAILED,
                               archive_error=note, archived_at=db.utcnow())
@@ -120,9 +130,31 @@ def _note(*parts: str | None) -> str | None:
     return "; ".join(kept) if kept else None
 
 
-def _retrieve(config: dict[str, Any], url: str,
-              force_archive_ph: bool) -> tuple[Extracted | None, str | None]:
+def _retrieve(config: dict[str, Any], url: str, force_archive_ph: bool,
+              capture_id: int | None = None
+              ) -> tuple[Extracted | None, str | None]:
     """Try the live page, fall back to archive.today when it looks paywalled."""
+    # A page handed to us by the browser needs no fetching at all -- it was
+    # rendered in a session that is already logged in and already past
+    # whatever bot check stands between us and the article.
+    if capture_id is not None:
+        path = capture_path(config, capture_id)
+        try:
+            html = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return None, f"captured page could not be read ({exc})"
+        # The point of capturing is to get past a bot check, so a captured
+        # bot check is a failed capture -- say so instead of filing it as the
+        # article. Happens if the bookmarklet is clicked while the
+        # interstitial is still on screen.
+        if is_challenge_page(html):
+            return None, ("the captured page was still a bot check -- wait for "
+                          "the article to load, then click the bookmarklet")
+        captured = extract(html, url, 200, source="browser")
+        if not captured.text.strip():
+            return None, "captured page had no readable text"
+        return captured, None
+
     session = requests.Session()
     user_agent = config["USER_AGENT"]
     timeout = config["FETCH_TIMEOUT"]
@@ -237,21 +269,22 @@ def _localize_images(config: dict[str, Any], target: Path, result: Extracted,
 
 
 def enqueue(config: dict[str, Any], article_id: int,
-            force_archive_ph: bool = False) -> bool:
+            force_archive_ph: bool = False,
+            from_capture: bool = False) -> bool:
     """Queue an article. Returns False if it is already being archived."""
     with _inflight_lock:
         if article_id in _inflight:
             return False
         _inflight.add(article_id)
-    _queue.put((config, article_id, force_archive_ph))
+    _queue.put((config, article_id, force_archive_ph, from_capture))
     return True
 
 
 def _worker() -> None:
     while True:
-        config, article_id, force = _queue.get()
+        config, article_id, force, captured = _queue.get()
         try:
-            archive_article(config, article_id, force)
+            archive_article(config, article_id, force, captured)
         except Exception:
             log.exception("worker crashed on article %s", article_id)
         finally:

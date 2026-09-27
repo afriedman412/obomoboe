@@ -91,7 +91,7 @@
           {%- else %}{{ {'pending': 'archiving...', 'ok': 'archived',
                          'failed': 'archive failed'}[a.archive_status] }}
           {%- endif %}
-          {%- if a.archive_source == 'archive.today' %} via archive.today{% endif %}
+          {%- if a.archive_source == 'archive.today' %} via archive.today{% elif a.archive_source == 'browser' %} via your browser{% endif %}
         </span>
       </div>
       <div class="tags" data-role="tags">

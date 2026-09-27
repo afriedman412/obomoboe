@@ -6,12 +6,16 @@
   <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
   <h1>One-click saving</h1>
   <p>Drag this to your bookmarks bar. Clicking it on any page saves that page
-    to your list.</p>
+    to your list &mdash; sending the article <em>as your browser has it</em>,
+    already logged in and already past any bot check.</p>
+  <p>That is the difference between saving a Medium or subscriber-only piece
+    and saving the words &ldquo;enable JavaScript and cookies to
+    continue&rdquo;.</p>
   <p style="margin: 24px 0;">
     <a class="bookmarklet-drag" href="{{ code }}">Save to obomoboe</a>
   </p>
   <p style="color: var(--muted); font-size: 13.5px;">
-    It posts the current URL to <code>{{ base }}/add</code>, so it only works
+    It posts the page to <code>{{ base }}/capture</code>, so it only works
     while this app is running.
   </p>
 </div>

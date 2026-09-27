@@ -50,6 +50,9 @@ def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
             if h.strip()
         ],
         "ARCHIVE_WORKERS": _env_int("OBOMOBOE_WORKERS", 2),
+        # Upper bound on a page captured by the bookmarklet. Rendered DOMs
+        # run large; this is a guard against a runaway, not a target.
+        "MAX_CAPTURE_BYTES": _env_int("OBOMOBOE_MAX_CAPTURE_BYTES", 12_000_000),
         # Set false in tests so archiving runs inline / not at all.
         "START_WORKERS": True,
     }

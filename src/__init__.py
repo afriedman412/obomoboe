@@ -17,6 +17,10 @@ def create_app(overrides: dict[str, Any] | None = None) -> Flask:
     app.config.update(build_config(overrides))
     app.secret_key = os.environ.get("OBOMOBOE_SECRET_KEY", "obomoboe-local")
 
+    # Cap the request body just above the capture limit, so an oversize page
+    # is refused by Flask rather than buffered in full.
+    app.config["MAX_CONTENT_LENGTH"] = app.config["MAX_CAPTURE_BYTES"] + 1_000_000
+
     Path(app.config["DATA_DIR"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["ARCHIVE_DIR"]).mkdir(parents=True, exist_ok=True)
     db.init_db(app.config["DB_PATH"])

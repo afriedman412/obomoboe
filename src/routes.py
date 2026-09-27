@@ -98,6 +98,72 @@ def _add_response(article_id: int | None, message: str, code: int,
     return redirect(request.referrer or url_for("main.index"))
 
 
+# The bookmarklet posts from the article's own origin, so the browser needs
+# permission to send it and to read the reply. Scoped to this one endpoint.
+def _cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    return response
+
+
+@bp.route("/capture", methods=["POST", "OPTIONS"])
+def capture():
+    """Take a page already rendered by the browser.
+
+    The live fetch runs from this machine with no session and no way past a
+    bot check. The browser doing the asking has both, so for anything behind
+    a challenge or a subscription this is the only thing that works.
+    """
+    if request.method == "OPTIONS":
+        return _cors(current_app.make_response(("", 204)))
+
+    payload = request.get_json(silent=True) or request.form
+    raw = payload.get("url", "")
+    html = payload.get("html", "") or ""
+    tags = payload.get("tags", "") or ""
+
+    try:
+        url = normalize_url(raw)
+    except ValueError as exc:
+        return _cors(jsonify({"error": str(exc)})), 400
+
+    limit = current_app.config["MAX_CAPTURE_BYTES"]
+    if len(html.encode("utf-8", "ignore")) > limit:
+        return _cors(jsonify({"error": f"page too large (limit {limit} bytes)"})), 413
+    if not html.strip():
+        return _cors(jsonify({"error": "no page content sent"})), 400
+
+    conn = db.get_db()
+    existing = db.find_by_url(conn, url)
+    if existing is not None:
+        article_id = int(existing["id"])
+    else:
+        try:
+            article_id = db.insert_article(conn, url=url, original_url=url)
+        except sqlite3.IntegrityError:
+            row = db.find_by_url(conn, url)
+            if row is None:
+                return _cors(jsonify({"error": "could not save"})), 500
+            article_id = int(row["id"])
+
+    # Tag whether or not the row is new -- re-capturing a page you are
+    # refiling should still accept the tags you sent with it.
+    for name in _split_tags(tags):
+        db.add_tag(conn, article_id, name)
+
+    path = archiver.capture_path(dict(current_app.config), article_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html, encoding="utf-8")
+
+    db.update_article(conn, article_id, archive_status=db.PENDING,
+                      archive_error=None)
+    queued = archiver.enqueue(dict(current_app.config), article_id,
+                              from_capture=True)
+    return _cors(jsonify({"id": article_id, "queued": queued,
+                          "message": "Captured from your browser"})), 201
+
+
 @bp.route("/a/<int:article_id>")
 def article(article_id: int):
     conn = db.get_db()
@@ -268,12 +334,17 @@ def api_articles():
 @bp.route("/bookmarklet")
 def bookmarklet():
     base = request.url_root.rstrip("/")
+    # Sends the page as your browser rendered it -- logged in, and past any
+    # bot check -- instead of asking the server to go and fetch it blind.
     code = (
         "javascript:(function(){"
-        "var f=document.createElement('form');"
-        f"f.method='POST';f.action='{base}/add';f.target='_blank';"
-        "var i=document.createElement('input');"
-        "i.name='url';i.value=location.href;f.appendChild(i);"
-        "document.body.appendChild(f);f.submit();f.remove();})();"
+        "fetch('" + base + "/capture',{method:'POST',"
+        "headers:{'Content-Type':'application/json'},"
+        "body:JSON.stringify({url:location.href,"
+        "html:document.documentElement.outerHTML})})"
+        ".then(function(r){return r.json()})"
+        ".then(function(d){alert(d.error?('obomoboe: '+d.error):"
+        "'Saved to obomoboe')})"
+        ".catch(function(e){alert('obomoboe: '+e)});})();"
     )
     return render_template("bookmarklet.html", code=code, base=base)

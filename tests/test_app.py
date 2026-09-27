@@ -1,4 +1,4 @@
-from src import db
+from src import archiver, db
 
 
 def add(client, url, tags=""):
@@ -155,3 +155,97 @@ class TestArticlePage:
         data = client.get(f"/api/articles?ids={article_id}").get_json()
         assert data["articles"][0]["archive_status"] == "pending"
         assert data["counts"]["unread"] == 1
+
+
+class TestCapture:
+    """Pages handed over by the browser, for sites the server cannot fetch."""
+
+    PAGE = ("<html><head><title>Behind The Wall</title>"
+            "<meta property='og:site_name' content='Walled'></head><body>"
+            "<article>" + "<p>Real subscriber-only sentence with plenty of "
+            "ordinary words in it.</p>" * 30 + "</article></body></html>")
+
+    def _capture(self, client, url="https://walled.example/piece", **extra):
+        body = {"url": url, "html": self.PAGE}
+        body.update(extra)
+        return client.post("/capture", json=body)
+
+    def test_captured_page_is_archived_without_fetching(self, client, app,
+                                                        conn, monkeypatch):
+        def no_network(*args, **kwargs):
+            raise AssertionError("capture must not hit the network")
+
+        monkeypatch.setattr(archiver, "fetch", no_network)
+        monkeypatch.setattr(archiver, "fetch_from_archive_ph", no_network)
+
+        resp = self._capture(client, tags="research")
+        assert resp.status_code == 201
+        article_id = resp.get_json()["id"]
+
+        archiver.archive_article(dict(app.config), article_id,
+                                 from_capture=True)
+
+        row = db.get_article(conn, article_id)
+        assert row["archive_status"] == "ok"
+        assert row["archive_source"] == "browser"
+        assert row["title"] == "Behind The Wall"
+        assert row["word_count"] > 200
+        assert "research" in db.tags_for_articles(conn, [article_id])[article_id]
+
+    def test_captured_text_is_searchable(self, client, app, conn):
+        article_id = self._capture(client).get_json()["id"]
+        archiver.archive_article(dict(app.config), article_id,
+                                 from_capture=True)
+        assert db.search_ids(conn, "subscriber") == [article_id]
+
+    def test_capturing_the_same_url_twice_updates_one_row(self, client):
+        first = self._capture(client).get_json()["id"]
+        second = self._capture(client).get_json()["id"]
+        assert first == second
+
+    def test_empty_page_is_refused(self, client):
+        resp = client.post("/capture", json={"url": "https://e.example/x",
+                                             "html": "   "})
+        assert resp.status_code == 400
+        assert "no page content" in resp.get_json()["error"]
+
+    def test_oversize_page_is_refused(self, client, app):
+        app.config["MAX_CAPTURE_BYTES"] = 500
+        resp = client.post("/capture", json={"url": "https://e.example/big",
+                                             "html": "x" * 2000})
+        assert resp.status_code == 413
+
+    def test_bad_url_is_refused(self, client):
+        resp = client.post("/capture", json={"url": "not a url",
+                                             "html": "<p>hi</p>"})
+        assert resp.status_code == 400
+
+    def test_browser_may_send_and_read_the_reply(self, client):
+        """Without these the bookmarklet's fetch is blocked by the browser."""
+        pre = client.open("/capture", method="OPTIONS")
+        assert pre.status_code == 204
+        assert pre.headers["Access-Control-Allow-Origin"] == "*"
+        assert "POST" in pre.headers["Access-Control-Allow-Methods"]
+        assert self._capture(client).headers["Access-Control-Allow-Origin"] == "*"
+
+    def test_captured_bot_check_is_refused_not_filed(self, client, app, conn):
+        """Capturing exists to get past a challenge; a captured challenge is
+        a failed capture, not an article."""
+        challenge = ("<html><head><title>Just a moment...</title></head><body>"
+                     "<script>window._cf_chl_opt={cvId:'3'};</script>"
+                     "</body></html>")
+        resp = client.post("/capture", json={"url": "https://walled.example/z",
+                                             "html": challenge})
+        article_id = resp.get_json()["id"]
+        archiver.archive_article(dict(app.config), article_id,
+                                 from_capture=True)
+        row = db.get_article(conn, article_id)
+        assert row["archive_status"] == "failed"
+        assert "still a bot check" in row["archive_error"]
+
+    def test_recapturing_still_accepts_tags(self, client):
+        first = self._capture(client, tags="one").get_json()["id"]
+        second = self._capture(client, tags="two").get_json()["id"]
+        assert first == second
+        resp = client.get(f"/api/articles?ids={first}")
+        assert set(resp.get_json()["articles"][0]["tags"]) == {"one", "two"}

@@ -22,11 +22,15 @@ network you share.
 
 ## Adding articles
 
-- Paste a URL into the box on the list page.
+- Paste a URL into the box on the list page. The server then goes and fetches
+  it.
 - Drag the bookmarklet from `/bookmarklet` to your bookmarks bar and click it
-  on any page you're reading.
+  on any page you're reading. This sends the page **as your browser has it**
+  rather than asking the server to fetch it — see below.
 - `POST /add` with `url` (and optional comma-separated `tags`), form-encoded or
   JSON.
+- `POST /capture` with `url` and `html` (and optional `tags`) to hand over a
+  page you already have.
 
 URLs are normalized before saving — scheme added, host lowercased, `utm_*`,
 `fbclid` and friends stripped — so the same article pasted from two places
@@ -47,6 +51,30 @@ data/archives/<id>/assets/         images, downloaded so they can't rot
 
 Search is SQLite FTS5 over the full text, not just titles.
 
+## Capturing from your browser
+
+A server-side fetch runs from this machine with no session and no way through
+a bot check. Your browser has both. So the bookmarklet posts
+`document.documentElement.outerHTML` to `/capture`, and the archiver extracts
+from that instead of fetching anything.
+
+This is the only thing that works for sites that refuse the server outright.
+Medium, for instance, answers a plain fetch with HTTP 403 and
+`cf-mitigated: challenge`, and answers a headless browser with "Sorry, you
+have been blocked" — but it renders fine in the browser you're logged into.
+The same applies to anything you subscribe to: the copy that gets archived is
+the copy you can see.
+
+Captured articles show as `via your browser`. Capturing a page while the bot
+check is still on screen is rejected rather than filed as the article, so wait
+for the piece to load before clicking.
+
+`/capture` sends CORS headers, because the bookmarklet posts from the
+article's own origin. That means any page you visit while the app is running
+could also post to it — the app binds to `127.0.0.1`, and captured HTML is
+sanitized and sandboxed exactly like fetched HTML, but it is the reason this
+stays off any network you share.
+
 ## Paywalls and archive.today
 
 If the live fetch returns very little text, or trips a paywall marker
@@ -62,6 +90,7 @@ The article page then offers a link that opens archive.today so you can create
 the snapshot by hand; hit **re-archive** afterwards and it will pick it up.
 
 Configuration is via environment variables: `OBOMOBOE_PORT`,
+`OBOMOBOE_MAX_CAPTURE_BYTES` (default 12MB),
 `OBOMOBOE_DATA_DIR`, `OBOMOBOE_MIN_WORDS` (paywall threshold, default 200),
 `OBOMOBOE_ARCHIVE_PH=0` to disable the fallback, `OBOMOBOE_ARCHIVE_IMAGES=0` to
 skip image downloads, `OBOMOBOE_WORKERS`.
@@ -70,7 +99,7 @@ skip image downloads, `OBOMOBOE_WORKERS`.
 
 | file | what it does |
 | --- | --- |
-| `src/routes.py` | HTTP endpoints |
+| `src/routes.py` | HTTP endpoints, including `/capture` |
 | `src/db.py` | SQLite schema and queries |
 | `src/extract.py` | URL normalizing, fetching, readability, sanitizing, archive.today |
 | `src/archiver.py` | writes snapshots to disk, background worker pool |
