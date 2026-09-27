@@ -11,7 +11,10 @@
     {% if article.author %}<span>{{ article.author }}</span>{% endif %}
     <a href="{{ article.original_url }}" target="_blank" rel="noreferrer">
       {{ article.site_name or article.original_url | hostname }} &nearr;</a>
-    {% if article.published_at %}<span>{{ article.published_at | humandate }}</span>{% endif %}
+    {% if article.published_at %}
+      <span title="{{ article.published_at }}">
+        {{ article.published_at | humantime }}</span>
+    {% endif %}
     {% if article.word_count %}<span>{{ article.word_count }} words</span>{% endif %}
     {% set thin = article.archive_status == 'ok' and article.archive_error %}
     <span class="pill pill--{{ 'thin' if thin else article.archive_status }}">
@@ -22,6 +25,12 @@
       {%- if article.archive_source == 'archive.today' %} via archive.today{% elif article.archive_source == 'browser' %} via your browser{% endif %}
     </span>
   </div>
+
+  <p class="source">
+    <span>from</span>
+    <a href="{{ article.original_url }}" target="_blank"
+       rel="noreferrer noopener">{{ article.original_url }}</a>
+  </p>
 
   <div class="toolbar">
     <form method="post" action="{{ url_for('main.set_status', article_id=article.id) }}">

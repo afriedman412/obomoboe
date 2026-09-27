@@ -335,6 +335,8 @@ button.danger:hover { background: var(--danger); color: var(--paper); }
   color: var(--muted);
 }
 .meta .site { color: var(--moss-deep); text-transform: uppercase; }
+/* Byline in the list -- the one piece of the meta row that is a person. */
+.meta .by { color: var(--ink); font-style: italic; }
 .meta .site:hover { color: var(--umber); }
 
 .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
@@ -428,6 +430,24 @@ button.danger:hover { background: var(--danger); color: var(--paper); }
   border-bottom: 2px solid var(--line-hard);
   box-shadow: 0 3px 0 var(--sage);
 }
+
+/* The address this came from, in full -- a copy of an article is worth less
+   if you cannot see what it is a copy of. */
+.source {
+  font-family: var(--stencil);
+  font-size: 11.5px;
+  line-height: 1.6;
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+}
+.source span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  margin-right: 6px;
+}
+.source a { color: var(--moss-deep); }
+.source a:hover { color: var(--umber); }
 
 .toolbar {
   display: flex;

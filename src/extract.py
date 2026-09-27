@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 from urllib.parse import (parse_qsl, quote, urlencode, urljoin, urlparse,
@@ -317,11 +318,19 @@ def extract(html: str, url: str, status_code: int = 200,
             result.title = og_title
         elif soup.title and soup.title.string:
             result.title = soup.title.string.strip()
+    if not result.author:
+        result.author = named_author(soup)
     if not result.excerpt:
         result.excerpt = _meta_content(soup, "og:description", "description")
     if not result.site_name:
         result.site_name = _meta_content(soup, "og:site_name") or domain_of(url)
-    if not result.published_at:
+    exact = precise_published_at(soup)
+    if exact and (not result.published_at
+                  or exact[:10] == str(result.published_at)[:10]):
+        # Same day, more detail -- take it. A different day means the two
+        # disagree about the facts, and readability checks more signals.
+        result.published_at = exact
+    elif not result.published_at:
         result.published_at = _meta_content(
             soup, "article:published_time", "datePublished"
         )
@@ -392,6 +401,91 @@ def collect_blocks(soup: BeautifulSoup) -> str:
         seen.add(id(tag))
         kept.append(str(tag))
     return "".join(kept)
+
+
+def _ld_json_blocks(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Every JSON-LD object on the page, including @graph members."""
+    found: list[dict[str, Any]] = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except (ValueError, TypeError):
+            continue
+        queue = data if isinstance(data, list) else [data]
+        while queue:
+            item = queue.pop(0)
+            if not isinstance(item, dict):
+                continue
+            found.append(item)
+            graph = item.get("@graph")
+            if isinstance(graph, list):
+                queue.extend(graph)
+    return found
+
+
+def precise_published_at(soup: BeautifulSoup) -> str | None:
+    """The publisher's own timestamp, seconds and offset intact.
+
+    Readability metadata reports a date and drops the time, so "posted at
+    22:49" became just the day. The page usually states it exactly; prefer
+    that when it is there and parseable.
+    """
+    candidates = [_meta_content(soup, "article:published_time", "datePublished",
+                                "article:published", "pubdate")]
+    for block in _ld_json_blocks(soup):
+        value = block.get("datePublished") or block.get("dateCreated")
+        if isinstance(value, str):
+            candidates.append(value)
+    for tag in soup.find_all("time"):
+        if tag.get("datetime"):
+            candidates.append(str(tag["datetime"]))
+
+    for raw in candidates:
+        if not raw:
+            continue
+        text = str(raw).strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            continue
+        # A bare date is no better than what we already have.
+        if (parsed.hour, parsed.minute, parsed.second) == (0, 0, 0) \
+                and "T" not in text:
+            continue
+        return parsed.isoformat(timespec="seconds")
+    return None
+
+
+def named_author(soup: BeautifulSoup) -> str | None:
+    """An author's name, from JSON-LD or meta tags.
+
+    Pages often put a profile URL in the author slot -- one had
+    "https://www.patreon.com/CultureStudy" there. A link is not a byline, so
+    anything URL-shaped is refused rather than printed under a headline.
+    """
+    candidates: list[Any] = []
+    for block in _ld_json_blocks(soup):
+        value = block.get("author") or block.get("creator")
+        for item in (value if isinstance(value, list) else [value]):
+            if isinstance(item, dict):
+                candidates.append(item.get("name"))
+            elif isinstance(item, str):
+                candidates.append(item)
+    candidates.append(_meta_content(soup, "author", "article:author",
+                                    "parsely-author", "sailthru.author"))
+
+    for raw in candidates:
+        if not isinstance(raw, str):
+            continue
+        name = " ".join(raw.split())
+        if not name or len(name) > 120:
+            continue
+        if re.match(r"^[a-z][a-z0-9+.-]*://", name, re.IGNORECASE):
+            continue
+        if name.startswith("@") or "/" in name:
+            continue
+        return name
+    return None
 
 
 def looks_paywalled(result: Extracted, min_words: int = 200) -> bool:

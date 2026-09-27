@@ -31,6 +31,7 @@ def create_app(overrides: dict[str, Any] | None = None) -> Flask:
     app.register_blueprint(bp)
 
     app.jinja_env.filters["humandate"] = _humandate
+    app.jinja_env.filters["humantime"] = _humantime
     app.jinja_env.filters["hostname"] = _hostname
 
     logging.basicConfig(level=logging.INFO,
@@ -55,6 +56,25 @@ def _humandate(value: str | None) -> str:
         except ValueError:
             continue
     return str(value)[:10]
+
+
+def _humantime(value: str | None) -> str:
+    """Like humandate, but keeps the clock time when the page gave us one,
+    shown in this machine's timezone rather than the publisher's."""
+    if not value:
+        return ""
+    from datetime import datetime
+
+    text = str(value).strip().replace("Z", "+00:00")
+    if "T" not in text:
+        return _humandate(value)
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return _humandate(value)
+    if moment.tzinfo is not None:
+        moment = moment.astimezone()
+    return moment.strftime("%b %-d, %Y at %-I:%M %p")
 
 
 def _hostname(url: str | None) -> str:

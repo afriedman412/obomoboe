@@ -282,17 +282,22 @@ def rearchive(article_id: int):
     if db.get_article(conn, article_id) is None:
         abort(404)
     force = request.form.get("source") == "archive.ph"
+    # Re-reading a page your browser handed over means re-reading that page,
+    # not going back to a server that could not fetch it in the first place.
+    recapture = (not force
+                 and archiver.capture_path(dict(current_app.config),
+                                           article_id).exists())
     db.update_article(conn, article_id, archive_status=db.PENDING,
                       archive_error=None)
     # A run already underway will write the row when it lands, so the article
     # never gets stranded as pending -- but say so rather than pretending the
     # click started the run you asked for.
     queued = archiver.enqueue(dict(current_app.config), article_id,
-                              force_archive_ph=force)
+                              force_archive_ph=force, from_capture=recapture)
 
     if _wants_json():
         return jsonify({"id": article_id, "archive_status": db.PENDING,
-                        "queued": queued})
+                        "queued": queued, "from_capture": recapture})
     flash("Re-archiving in the background" if queued
           else "Already archiving -- wait for the run in progress to finish",
           "ok")

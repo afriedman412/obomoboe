@@ -205,3 +205,73 @@ class TestChallengeFalsePositives:
                 '</script><script>__CF$cv$params={r:"abc"};</script>'
                 "</body></html>")
         assert not is_challenge_page(page, {"Server": "cloudflare"})
+
+
+class TestPublishedTimestamp:
+    def _page(self, extra: str) -> str:
+        return ("<html><head><title>T</title>" + extra + "</head><body>"
+                "<article>" + "<p>ordinary article words here</p>" * 30 +
+                "</article></body></html>")
+
+    def test_meta_time_is_kept_not_truncated_to_the_day(self):
+        page = self._page(
+            "<meta property='article:published_time' "
+            "content='2026-09-24T22:49:25.000Z'>")
+        result = extract(page, "https://example.com/p")
+        assert result.published_at.startswith("2026-09-24T22:49:25")
+
+    def test_ld_json_is_read_too(self):
+        page = self._page(
+            '<script type="application/ld+json">'
+            '{"@type":"Article","datePublished":"2026-03-04T08:15:00+00:00"}'
+            "</script>")
+        result = extract(page, "https://example.com/p")
+        assert result.published_at.startswith("2026-03-04T08:15:00")
+
+    def test_graph_wrapped_ld_json_is_read(self):
+        page = self._page(
+            '<script type="application/ld+json">'
+            '{"@graph":[{"@type":"WebPage"},'
+            '{"@type":"Article","datePublished":"2026-05-06T17:30:00Z"}]}'
+            "</script>")
+        result = extract(page, "https://example.com/p")
+        assert result.published_at.startswith("2026-05-06T17:30:00")
+
+    def test_a_bare_date_is_left_alone(self):
+        page = self._page(
+            "<meta property='article:published_time' content='2026-09-24'>")
+        result = extract(page, "https://example.com/p")
+        assert str(result.published_at).startswith("2026-09-24")
+
+    def test_unparseable_timestamp_does_not_break_extraction(self):
+        page = self._page(
+            "<meta property='article:published_time' content='last Tuesday'>")
+        assert extract(page, "https://example.com/p").word_count > 50
+
+
+class TestAuthorExtraction:
+    def _page(self, extra: str) -> str:
+        return ("<html><head><title>T</title>" + extra + "</head><body>"
+                "<article>" + "<p>ordinary article words here</p>" * 30 +
+                "</article></body></html>")
+
+    def test_a_url_is_never_used_as_a_byline(self):
+        """One page put a Patreon link in the author slot."""
+        page = self._page(
+            "<meta name='author' content='https://www.patreon.com/CultureStudy'>")
+        assert extract(page, "https://example.com/p").author is None
+
+    def test_ld_json_author_name_is_used(self):
+        page = self._page(
+            '<script type="application/ld+json">'
+            '{"@type":"Article","author":{"@type":"Person","name":"Ada Lovelace"}}'
+            "</script>")
+        assert extract(page, "https://example.com/p").author == "Ada Lovelace"
+
+    def test_meta_author_name_is_used(self):
+        page = self._page("<meta name='author' content='Grace Hopper'>")
+        assert extract(page, "https://example.com/p").author == "Grace Hopper"
+
+    def test_handles_are_not_bylines(self):
+        page = self._page("<meta name='author' content='@someaccount'>")
+        assert extract(page, "https://example.com/p").author is None

@@ -81,6 +81,7 @@
       <div class="meta">
         <a class="site" href="{{ a.original_url }}" target="_blank" rel="noreferrer">
           {{ a.site_name or a.original_url | hostname }} &nearr;</a>
+        {% if a.author %}<span class="by">{{ a.author }}</span>{% endif %}
         <span>added {{ a.added_at | humandate }}</span>
         {% if a.word_count %}<span>{{ a.word_count }} words</span>{% endif %}
         {% if a.published_at %}<span>pub. {{ a.published_at | humandate }}</span>{% endif %}

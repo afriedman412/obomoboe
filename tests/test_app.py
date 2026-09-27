@@ -257,3 +257,56 @@ class TestCapture:
             "html": "<html><body><p>drag this to your bookmarks bar</p></body></html>"})
         assert resp.status_code == 400
         assert "obomoboe's own page" in resp.get_json()["error"]
+
+
+class TestTimestampDisplay:
+    def test_time_is_shown_when_the_page_gave_one(self, app):
+        fmt = app.jinja_env.filters["humantime"]
+        with app.app_context():
+            assert "at" in fmt("2026-09-24T22:49:25+00:00")
+            # A bare date has no time to show, so it reads as a date.
+            assert fmt("2026-09-24") == "Sep 24, 2026"
+            assert fmt(None) == ""
+            # Junk passes through rather than raising.
+            assert fmt("not a date") == "not a date"
+
+    def test_author_appears_in_the_list(self, client, conn, app):
+        article_id = db.insert_article(conn, url="https://e.example/a",
+                                       original_url="https://e.example/a")
+        db.update_article(conn, article_id, title="Piece", author="Ada Lovelace")
+        page = client.get("/").get_data(as_text=True)
+        assert "Ada Lovelace" in page
+
+
+class TestRearchiveOfCaptured:
+    def test_rearchive_reuses_the_capture_instead_of_fetching(
+            self, client, app, conn, monkeypatch):
+        page = ("<html><head><title>Held Page</title></head><body><article>"
+                + "<p>captured words that only the browser could reach</p>" * 30
+                + "</article></body></html>")
+        article_id = client.post("/capture", json={
+            "url": "https://walled.example/held", "html": page}).get_json()["id"]
+
+        def no_network(*args, **kwargs):
+            raise AssertionError("re-archive must reuse the captured page")
+
+        monkeypatch.setattr(archiver, "fetch", no_network)
+        monkeypatch.setattr(archiver, "fetch_from_archive_ph", no_network)
+
+        resp = client.post(f"/a/{article_id}/rearchive",
+                           headers={"X-Requested-With": "XMLHttpRequest"})
+        assert resp.get_json()["from_capture"] is True
+        archiver.archive_article(dict(app.config), article_id,
+                                 from_capture=True)
+        assert db.get_article(conn, article_id)["archive_source"] == "browser"
+
+
+class TestOriginalLinkOnPage:
+    def test_the_full_source_url_is_shown(self, client, conn):
+        url = "https://example.com/section/a-long-piece-about-things?ref=x"
+        article_id = db.insert_article(conn, url=url, original_url=url)
+        db.update_article(conn, article_id, title="A Piece")
+        page = client.get(f"/a/{article_id}").get_data(as_text=True)
+        # Not merely linked -- the address itself is on the page.
+        assert url in page
+        assert 'rel="noreferrer noopener"' in page
