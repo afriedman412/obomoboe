@@ -248,6 +248,27 @@ button.danger:hover { background: var(--danger); color: var(--paper); }
   box-shadow: 2px 2px 0 var(--line-hard);
 }
 .chip--sm { font-size: 11px; padding: 1px 8px; }
+button.chip { cursor: pointer; font-family: var(--stencil); }
+
+/* The forms exist so removal works without JS; they must not disturb the
+   flex row the chips are laid out in. */
+.tagform { display: contents; }
+
+/* Marked for removal, not yet removed. Struck through and in the danger
+   colour so a staged change is obvious before you commit it. */
+.chip--removing {
+  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.chip--removing:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--paper);
+  text-decoration: line-through;
+}
 
 /* Offered, not filed -- dashed until you accept it. */
 .chip--suggest {

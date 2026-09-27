@@ -273,13 +273,23 @@ def edit_tags(article_id: int):
 
     for name in _split_tags(request.form.get("add", "")):
         db.add_tag(conn, article_id, name)
-    remove = request.form.get("remove", "").strip()
-    if remove:
-        db.remove_tag(conn, article_id, remove)
+
+    # The list stages removals and sends them together, so take a list. A
+    # single name still works, which is what the article page sends.
+    for name in _split_tags(request.form.get("remove", "")):
+        db.remove_tag(conn, article_id, name)
+
+    # Same button that commits the removals drops what is still only offered.
+    if request.form.get("dismiss"):
+        db.set_suggestions(conn, article_id, [])
 
     tags = db.tags_for_articles(conn, [article_id]).get(article_id, [])
     if _wants_json():
-        return jsonify({"id": article_id, "tags": tags})
+        return jsonify({
+            "id": article_id,
+            "tags": tags,
+            "suggestions": db.get_suggestions(db.get_article(conn, article_id)),
+        })
     return redirect(request.referrer or url_for("main.article",
                                                 article_id=article_id))
 

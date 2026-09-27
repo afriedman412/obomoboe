@@ -1,3 +1,5 @@
+from bs4 import BeautifulSoup
+
 from src import archiver, db
 
 
@@ -396,14 +398,12 @@ class TestDismissFromTheList:
         assert tags == ["keeper"]
         assert db.get_suggestions(db.get_article(conn, article_id)) == []
 
-    def test_the_button_is_on_the_list_only_while_there_is_something_to_drop(
-            self, client, conn):
+    def test_the_button_stays_once_suggestions_are_gone(self, client, conn):
+        """It commits tag removals as well, so it is not tied to suggestions."""
         article_id = self._article_with_suggestions(conn, ["one"])
-        assert 'data-action="dismiss-suggestions"' in \
-            client.get("/").get_data(as_text=True)
         client.post(f"/a/{article_id}/suggestions/dismiss",
                     headers={"X-Requested-With": "XMLHttpRequest"})
-        assert 'data-action="dismiss-suggestions"' not in \
+        assert 'data-action="commit-removals"' in \
             client.get("/").get_data(as_text=True)
 
     def test_accepting_reports_what_is_left(self, client, conn):
@@ -413,3 +413,89 @@ class TestDismissFromTheList:
                            data={"tag": "only"},
                            headers={"X-Requested-With": "XMLHttpRequest"})
         assert resp.get_json()["suggestions"] == []
+
+
+class TestRemovableTagsFromTheList:
+    def _row(self, conn, tags=(), suggestions=()):
+        article_id = db.insert_article(conn, url="https://e.example/r",
+                                       original_url="https://e.example/r")
+        db.update_article(conn, article_id, title="Piece")
+        for name in tags:
+            db.add_tag(conn, article_id, name)
+        db.set_suggestions(conn, article_id, list(suggestions))
+        return article_id
+
+    def test_several_tags_can_be_removed_in_one_go(self, client, conn):
+        article_id = self._row(conn, tags=["keep", "drop one", "drop two"])
+        resp = client.post(f"/a/{article_id}/tags",
+                           data={"remove": "drop one,drop two", "dismiss": "1"},
+                           headers={"X-Requested-With": "XMLHttpRequest"})
+        assert resp.get_json()["tags"] == ["keep"]
+
+    def test_a_single_name_still_works(self, client, conn):
+        """The article page sends one name; that must keep working."""
+        article_id = self._row(conn, tags=["keep", "drop"])
+        client.post(f"/a/{article_id}/tags", data={"remove": "drop"})
+        assert db.tags_for_articles(conn, [article_id])[article_id] == ["keep"]
+
+    def test_the_same_press_clears_suggestions(self, client, conn):
+        article_id = self._row(conn, tags=["drop"], suggestions=["a", "b"])
+        resp = client.post(f"/a/{article_id}/tags",
+                           data={"remove": "drop", "dismiss": "1"},
+                           headers={"X-Requested-With": "XMLHttpRequest"})
+        body = resp.get_json()
+        assert body["tags"] == [] and body["suggestions"] == []
+
+    def test_dismissing_nothing_removes_nothing(self, client, conn):
+        article_id = self._row(conn, tags=["keep"])
+        client.post(f"/a/{article_id}/tags", data={"dismiss": "1"},
+                    headers={"X-Requested-With": "XMLHttpRequest"})
+        assert db.tags_for_articles(conn, [article_id])[article_id] == ["keep"]
+
+    def test_the_button_is_always_there(self, client, conn):
+        """It commits removals too, so it cannot come and go with suggestions."""
+        article_id = self._row(conn, tags=["solo"])
+        assert db.get_suggestions(db.get_article(conn, article_id)) == []
+        page = client.get("/").get_data(as_text=True)
+        assert 'data-action="commit-removals"' in page
+
+    def test_tags_post_back_without_javascript(self, client, conn):
+        """Each chip is a submit button in a real form, so removal works with
+        scripting off -- immediately, rather than staged."""
+        article_id = self._row(conn, tags=["gone"])
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        form = soup.select_one(".tags form[action$='/tags']")
+        assert form is not None and form.get("method") == "post"
+        chip = form.find("button", attrs={"name": "remove"})
+        assert chip["value"] == "gone" and chip["type"] == "submit"
+
+        client.post(f"/a/{article_id}/tags", data={"remove": "gone"})
+        assert db.tags_for_articles(conn, [article_id]).get(article_id, []) == []
+
+
+class TestListStatusButton:
+    def test_it_posts_status_rather_than_linking_to_the_article(
+            self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/m",
+                                       original_url="https://e.example/m")
+        db.update_article(conn, article_id, title="Piece")
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        actions = soup.select_one(".actions")
+        assert actions.find("a") is None, "no second link to the article"
+        form = actions.find("form")
+        assert form["action"].endswith(f"/a/{article_id}/status")
+        assert form.find("input", attrs={"name": "status"})["value"] == "read"
+
+    def test_it_works_without_javascript(self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/m2",
+                                       original_url="https://e.example/m2")
+        client.post(f"/a/{article_id}/status", data={"status": "read"})
+        assert db.get_article(conn, article_id)["status"] == "read"
+
+    def test_the_label_follows_the_state(self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/m3",
+                                       original_url="https://e.example/m3")
+        db.update_article(conn, article_id, title="Piece")
+        assert "mark read" in client.get("/").get_data(as_text=True)
+        db.set_status(conn, article_id, db.READ)
+        assert "mark unread" in client.get("/").get_data(as_text=True)

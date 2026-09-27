@@ -28,12 +28,25 @@
     if (!item) return;
     var id = item.dataset.id;
 
+    /* Two controls, one state: the seal and the text button in the corner. */
     if (trigger.dataset.action === "toggle") {
+      event.preventDefault();
       post("/a/" + id + "/status", {}).then(function (data) {
-        item.classList.toggle("is-read", data.status === "read");
-        var label = "Mark " + (data.status === "read" ? "unread" : "read");
-        trigger.title = label;
-        trigger.setAttribute("aria-label", label);
+        var isRead = data.status === "read";
+        item.classList.toggle("is-read", isRead);
+        var label = "Mark " + (isRead ? "unread" : "read");
+
+        var seal = item.querySelector(".toggle");
+        if (seal) {
+          seal.title = label;
+          seal.setAttribute("aria-label", label);
+        }
+        var text = item.querySelector('[data-role="status-label"]');
+        if (text) {
+          text.textContent = "mark " + (isRead ? "unread" : "read");
+          var field = text.form && text.form.querySelector('[name="status"]');
+          if (field) field.value = isRead ? "unread" : "read";
+        }
       });
     }
 
@@ -47,26 +60,42 @@
     }
 
     if (trigger.dataset.action === "accept-suggestion") {
+      event.preventDefault();
       var name = trigger.dataset.tag;
       trigger.disabled = true;
       post("/a/" + id + "/suggestions/accept", { tag: name })
         .then(function (data) {
           trigger.remove();
           renderTags(item, data.tags);
-          if (!data.suggestions.length) dropDismiss(item);
         })
         .catch(function () { trigger.disabled = false; });
     }
 
-    /* Clears whatever is still on offer, keeping anything already accepted. */
-    if (trigger.dataset.action === "dismiss-suggestions") {
+    /* Marking is staged: nothing leaves until dismiss is pressed, so a
+       misclick costs a second click rather than a tag. */
+    if (trigger.dataset.action === "toggle-remove") {
+      event.preventDefault();
+      trigger.classList.toggle("chip--removing");
+    }
+
+    /* One button, two jobs: delete what you marked, drop what you ignored. */
+    if (trigger.dataset.action === "commit-removals") {
+      event.preventDefault();
+      var marked = Array.prototype.map.call(
+        item.querySelectorAll(".chip--removing"),
+        function (chip) { return chip.dataset.tag; }
+      );
+      var pending = item.querySelectorAll(".chip--suggest").length;
+      if (!marked.length && !pending) return;
+
       trigger.disabled = true;
-      post("/a/" + id + "/suggestions/dismiss", {})
-        .then(function () {
+      post("/a/" + id + "/tags", { remove: marked.join(","), dismiss: "1" })
+        .then(function (data) {
           item.querySelectorAll(".chip--suggest").forEach(function (chip) {
             chip.remove();
           });
-          dropDismiss(item);
+          renderTags(item, data.tags);
+          trigger.disabled = false;
         })
         .catch(function () { trigger.disabled = false; });
     }
@@ -96,24 +125,29 @@
     input.addEventListener("blur", function () { finish(true); });
   }
 
-  function dropDismiss(item) {
-    var button = item.querySelector('[data-action="dismiss-suggestions"]');
-    if (button) button.remove();
-  }
-
   function renderTags(item, tags) {
-    var container = item.querySelector('[data-role="tags"]');
-    var add = container.querySelector(".chip--add");
-    container.querySelectorAll("a.chip").forEach(function (chip) {
-      chip.remove();
+    var form = item.querySelector(".tagform");
+    var commit = form.querySelector('[data-action="commit-removals"]');
+    /* Anything still marked stays marked across a re-render. */
+    var marked = {};
+    form.querySelectorAll(".chip--removing").forEach(function (chip) {
+      marked[chip.dataset.tag] = true;
     });
-    var firstSuggestion = container.querySelector(".chip--suggest");
+
+    form.querySelectorAll('[data-action="toggle-remove"]').forEach(
+      function (chip) { chip.remove(); }
+    );
     tags.forEach(function (name) {
-      var chip = document.createElement("a");
-      chip.className = "chip chip--sm";
-      chip.href = "/?tag=" + encodeURIComponent(name);
+      var chip = document.createElement("button");
+      chip.type = "submit";
+      chip.name = "remove";
+      chip.value = name;
+      chip.className = "chip chip--sm" + (marked[name] ? " chip--removing" : "");
+      chip.dataset.action = "toggle-remove";
+      chip.dataset.tag = name;
+      chip.title = "Click to mark for removal";
       chip.textContent = name;
-      container.insertBefore(chip, firstSuggestion || add);
+      form.insertBefore(chip, commit);
     });
   }
 

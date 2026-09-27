@@ -96,24 +96,45 @@
         </span>
       </div>
       <div class="tags" data-role="tags">
-        {% for name in a.tags %}
-          <a class="chip chip--sm" href="{{ querylink(new_tag=name) }}">{{ name }}</a>
-        {% endfor %}
-        {% for name in a.suggestions %}
-          <button class="chip chip--suggest" type="button"
-                  data-action="accept-suggestion" data-tag="{{ name }}"
-                  title="Suggested — click to keep">{{ name }} +</button>
-        {% endfor %}
-        {% if a.suggestions %}
-          <button class="dismiss" type="button" data-action="dismiss-suggestions"
-                  title="Drop the suggestions you haven't kept">dismiss</button>
-        {% endif %}
+        {# Real forms so a click still works with JS off, where it removes
+           straight away rather than staging. #}
+        <form class="tagform" method="post"
+              action="{{ url_for('main.edit_tags', article_id=a.id) }}">
+          {% for name in a.tags %}
+            <button class="chip chip--sm" type="submit" name="remove"
+                    value="{{ name }}" data-action="toggle-remove"
+                    data-tag="{{ name }}"
+                    title="Click to mark for removal">{{ name }}</button>
+          {% endfor %}
+          <button class="dismiss" type="submit" name="dismiss" value="1"
+                  data-action="commit-removals"
+                  title="Remove marked tags, drop unkept suggestions"
+                  >dismiss</button>
+        </form>
+
+        <form class="tagform" method="post"
+              action="{{ url_for('main.accept_suggestion', article_id=a.id) }}">
+          {% for name in a.suggestions %}
+            <button class="chip chip--suggest" type="submit" name="tag"
+                    value="{{ name }}" data-action="accept-suggestion"
+                    data-tag="{{ name }}"
+                    title="Suggested — click to keep">{{ name }} +</button>
+          {% endfor %}
+        </form>
+
         <button class="chip chip--add" type="button" data-action="add-tag">+ tag</button>
       </div>
     </div>
 
     <div class="actions">
-      <a href="{{ url_for('main.article', article_id=a.id) }}">read</a>
+      {# The title is already the way in; this marks it instead. #}
+      <form class="tagform" method="post"
+            action="{{ url_for('main.set_status', article_id=a.id) }}">
+        <input type="hidden" name="status"
+               value="{{ 'unread' if a.status == 'read' else 'read' }}">
+        <button type="submit" data-action="toggle" data-role="status-label"
+          >mark {{ 'unread' if a.status == 'read' else 'read' }}</button>
+      </form>
       <button type="button" data-action="delete">delete</button>
     </div>
   </li>
