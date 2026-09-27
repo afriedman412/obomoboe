@@ -1,6 +1,6 @@
 import pytest
 
-from src.extract import (CHALLENGE_TEXT, Extracted, extract,
+from src.extract import (Extracted, extract,
                          is_challenge_page, looks_paywalled, normalize_url,
                          sanitize_fragment)
 
@@ -118,15 +118,26 @@ class TestChallengePage:
     <p>Enable JavaScript and cookies to continue</p></body></html>
     """
 
-    def test_bot_check_is_not_treated_as_an_article(self):
+    def test_thin_interstitial_is_not_treated_as_an_article(self):
+        """No signature here, but the word-count floor still catches it."""
         result = extract(self.CHALLENGE, "https://example.com/post")
         assert looks_paywalled(result)
+
+    def test_writing_about_bot_checks_is_not_a_bot_check(self):
+        """This app's own bookmarklet page quotes the words a challenge puts
+        on screen; phrase matching flagged it as one."""
+        page = ("<html><body><p>The bookmarklet is the difference between "
+                "saving the article and saving the words 'enable JavaScript "
+                "and cookies to continue'.</p></body></html>")
+        assert not is_challenge_page(page)
 
     def test_bot_check_caught_even_above_the_word_threshold(self):
         # Length alone must not clear it: a wordy interstitial is still not
         # the article.
         padded = self.CHALLENGE.replace(
-            "</body>", "<p>" + "filler " * 400 + "</p></body>")
+            "</body>",
+            "<script>window._cf_chl_opt={cvId:'3'};</script>"
+            "<p>" + "filler " * 400 + "</p></body>")
         result = extract(padded, "https://example.com/post")
         assert result.word_count > 200
         assert looks_paywalled(result)
@@ -140,8 +151,6 @@ class TestChallengePage:
         <script>window._cf_chl_opt={cvId:"3",cType:"managed"};</script>
         </body></html>
         """
-        assert not any(m in page.lower() for m in CHALLENGE_TEXT), \
-            "fixture must not rely on the text markers"
         assert is_challenge_page(page)
 
     def test_response_headers_alone_are_enough(self):

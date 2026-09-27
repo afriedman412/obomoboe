@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
@@ -127,6 +128,14 @@ def capture():
         url = normalize_url(raw)
     except ValueError as exc:
         return _cors(jsonify({"error": str(exc)})), 400
+
+    # Clicking the bookmarklet while still on obomoboe's own page is an easy
+    # mistake -- it is where you just dragged it from. Saying so beats filing
+    # the app's own page as an article.
+    if urlparse(url).netloc == urlparse(request.url_root).netloc:
+        return _cors(jsonify({
+            "error": "that is obomoboe's own page -- open the article you want "
+                     "to save, then click the bookmarklet there"})), 400
 
     limit = current_app.config["MAX_CAPTURE_BYTES"]
     if len(html.encode("utf-8", "ignore")) > limit:

@@ -249,3 +249,11 @@ class TestCapture:
         assert first == second
         resp = client.get(f"/api/articles?ids={first}")
         assert set(resp.get_json()["articles"][0]["tags"]) == {"one", "two"}
+
+    def test_capturing_obomoboes_own_page_is_refused_clearly(self, client):
+        """Easy mistake: the bookmarklet is clicked where it was dragged from."""
+        resp = client.post("/capture", json={
+            "url": "http://localhost/bookmarklet",
+            "html": "<html><body><p>drag this to your bookmarks bar</p></body></html>"})
+        assert resp.status_code == 400
+        assert "obomoboe's own page" in resp.get_json()["error"]

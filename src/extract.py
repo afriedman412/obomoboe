@@ -61,15 +61,6 @@ CHALLENGE_MARKUP = (
     "cf-error",                      # Cloudflare block page (error 1020 etc.)
 )
 
-# Only consulted when nothing above matched, and only near the top of the
-# document, so an article *about* paywalls isn't mistaken for one.
-CHALLENGE_TEXT = (
-    "just a moment",
-    "checking your browser",
-    "cf-browser-verification",
-    "enable javascript and cookies",
-    "captcha-delivery",
-)
 
 ALLOWED_TAGS = {
     "a", "abbr", "b", "blockquote", "br", "caption", "cite", "code", "dd",
@@ -471,10 +462,16 @@ def is_challenge_page(html: str,
                       headers: dict[str, str] | None = None) -> bool:
     """Is this a bot check rather than the page we asked for?
 
-    Prose is the weakest signal available: it is localized, A/B tested and
-    reworded without notice -- the Cloudflare interstitial that prompted this
-    says "Please hold a moment" and matches none of the stock phrases. So go
-    by what the machinery emits instead, and keep text as a last resort.
+    Headers and markup only. Phrase matching was tried and dropped: across
+    every page tested it produced no true positives and two failures -- it
+    missed a real Cloudflare interstitial titled "Please hold a moment", and
+    it flagged this app's own bookmarklet page, whose copy happens to quote
+    the words a bot check puts on screen. Any page that merely writes about
+    bot checks would trip it.
+
+    Nothing is lost by dropping it. A challenge page has almost no text, so
+    the word-count floor still catches one from a vendor with no signature
+    here; it is only reported as thin rather than as a bot check.
     """
     if headers:
         lowered = {str(k).lower(): str(v).lower() for k, v in headers.items()}
@@ -490,7 +487,7 @@ def is_challenge_page(html: str,
     if any(marker in haystack for marker in CHALLENGE_MARKUP):
         return True
 
-    return any(marker in html[:4000].lower() for marker in CHALLENGE_TEXT)
+    return False
 
 
 def dump_metadata(result: Extracted) -> str:
