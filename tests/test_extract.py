@@ -137,8 +137,8 @@ class TestChallengePage:
         page = """
         <html><head><title>Please hold a moment&hellip;</title></head>
         <body><p>We are just confirming your site connection is secure.</p>
-        <script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1">
-        </script></body></html>
+        <script>window._cf_chl_opt={cvId:"3",cType:"managed"};</script>
+        </body></html>
         """
         assert not any(m in page.lower() for m in CHALLENGE_TEXT), \
             "fixture must not rely on the text markers"
@@ -154,3 +154,45 @@ class TestChallengePage:
         page = "<html><body>" + "<p>real words here</p>" * 50 + "</body></html>"
         assert not is_challenge_page(
             page, {"Server": "cloudflare", "CF-Ray": "a40b98-IAD"})
+
+
+class TestBlockBuiltArticles:
+    """Some CMSs split one article across many sibling containers; a
+    single-best-container reading keeps one and drops the rest."""
+
+    PAGE = """
+    <html><head><title>Split</title></head><body>
+      <nav><p>home about contact us today</p></nav>
+      <div class="grid">
+        <div class="rich-text-block"><p>%s</p></div>
+        <div class="rich-text-block"><p>%s</p></div>
+        <div class="rich-text-block"><p>%s</p></div>
+      </div>
+      <div class="newsletter"><p>Stay updated with our newsletter today
+        and confirm your opt-in preferences now please</p></div>
+      <footer><p>copyright notice goes here all rights reserved</p></footer>
+    </body></html>
+    """ % tuple("Block %d " % i + "sentence words carrying real article text "
+                * 12 for i in range(3))
+
+    def test_all_blocks_are_recovered(self):
+        result = extract(self.PAGE, "https://example.com/post")
+        for i in range(3):
+            assert f"Block {i}" in result.text, f"block {i} was dropped"
+
+    def test_chrome_is_left_out(self):
+        text = extract(self.PAGE, "https://example.com/post").text.lower()
+        assert "newsletter" not in text
+        assert "rights reserved" not in text
+        assert "home about contact" not in text
+
+
+class TestChallengeFalsePositives:
+    def test_invisible_bot_management_is_not_a_challenge(self):
+        """Cloudflare injects its detection JS into ordinary pages. Treating
+        that as an interstitial flagged a real article as a bot check."""
+        page = ("<html><body>" + "<p>genuine article prose here</p>" * 40 +
+                '<script src="/cdn-cgi/challenge-platform/h/b/scripts/jsd">'
+                '</script><script>__CF$cv$params={r:"abc"};</script>'
+                "</body></html>")
+        assert not is_challenge_page(page, {"Server": "cloudflare"})

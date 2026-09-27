@@ -48,18 +48,16 @@ PAYWALL_MARKERS = (
 # globals and cookie names -- because the human-readable copy on these pages
 # changes freely and is localized.
 CHALLENGE_MARKUP = (
-    "/cdn-cgi/challenge-platform",   # Cloudflare managed challenge
-    "challenges.cloudflare.com",     # Turnstile
+    # Options blob Cloudflare only emits on an actual interstitial. Its
+    # invisible bot-management JS (/cdn-cgi/challenge-platform, __cf$cv$params)
+    # is injected into ordinary pages too, so matching on that flagged a
+    # perfectly good article as a bot check -- keep to the challenge-only bits.
     "_cf_chl_opt",
-    "__cf$cv$params",
     "window._cf_chl",
-    "captcha-delivery.com",          # DataDome
-    "_incapsula_resource",           # Imperva / Incapsula
-    "perimeterx",                    # PerimeterX / HUMAN
-    "px-captcha",
+    "captcha-delivery.com",          # DataDome captcha page
+    "px-captcha",                    # PerimeterX captcha page, not its sensor
     "queue-it.net",                  # Queue-it waiting room
-    "/akam/",                        # Akamai Bot Manager
-    "bm-verify",
+    "bm-verify",                     # Akamai challenge body
 )
 
 # Only consulted when nothing above matched, and only near the top of the
@@ -297,10 +295,17 @@ def extract(html: str, url: str, status_code: int = 200,
         include_images=True, include_formatting=True, include_tables=True,
         favor_recall=True,
     ) or ""
-    result.readable_html = sanitize_fragment(readable)
     result.text = trafilatura.extract(html, url=url, favor_recall=True) or ""
 
     soup = BeautifulSoup(html, "lxml")
+
+    # A single-container reading can miss most of a block-built article.
+    blocks = collect_blocks(soup)
+    block_text = BeautifulSoup(blocks, "lxml").get_text(" ", strip=True)
+    if len(block_text.split()) > len(result.text.split()) * 1.4:
+        readable, result.text = blocks, block_text
+
+    result.readable_html = sanitize_fragment(readable)
 
     try:
         meta = trafilatura.extract_metadata(html, default_url=url)
@@ -349,6 +354,52 @@ def _image_urls(fragment: str, base_url: str) -> list[str]:
         if absolute not in urls and urlparse(absolute).scheme in ("http", "https"):
             urls.append(absolute)
     return urls
+
+
+# Block-based CMS layouts (Webflow and friends) split one article across many
+# sibling containers. Readability heuristics score a single best container and
+# return only that, so the rest of the piece is silently dropped -- one article
+# came back as 444 of its 1279 words, starting mid-sentence. When that happens,
+# collect the blocks ourselves and keep whichever copy recovered more.
+
+BOILERPLATE_HINTS = (
+    "newsletter", "subscribe", "signup", "sign-up", "related", "recirc",
+    "footer", "nav", "menu", "social", "share", "comment", "promo",
+    "advert", "cookie", "banner", "sidebar", "breadcrumb", "caption",
+)
+
+BLOCK_TAGS = ("p", "blockquote", "h2", "h3", "h4", "li", "pre")
+
+
+def _is_chrome(tag: Any) -> bool:
+    """Is this element page furniture rather than the article?"""
+    for element in [tag, *list(tag.parents)[:6]]:
+        name = getattr(element, "name", "") or ""
+        if name in ("nav", "footer", "header", "aside", "form"):
+            return True
+        classes = element.get("class") or [] if hasattr(element, "get") else []
+        ident = " ".join(list(classes) + [str(element.get("id") or "")]).lower()
+        if any(hint in ident for hint in BOILERPLATE_HINTS):
+            return True
+    return False
+
+
+def collect_blocks(soup: BeautifulSoup) -> str:
+    """Gather the article's text blocks in document order, skipping chrome."""
+    kept: list[str] = []
+    seen: set[int] = set()
+    for tag in soup.find_all(BLOCK_TAGS):
+        if id(tag) in seen or _is_chrome(tag):
+            continue
+        # Skip a block already covered by one we kept (nested li inside li).
+        if any(id(parent) in seen for parent in tag.parents):
+            continue
+        text = tag.get_text(" ", strip=True)
+        if len(text.split()) < 4:
+            continue
+        seen.add(id(tag))
+        kept.append(str(tag))
+    return "".join(kept)
 
 
 def looks_paywalled(result: Extracted, min_words: int = 200) -> bool:
