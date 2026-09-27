@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS articles (
     archive_source  TEXT,
     archive_error   TEXT,
     archived_at     TEXT,
-    notes           TEXT NOT NULL DEFAULT ''
+    notes           TEXT NOT NULL DEFAULT '',
+    suggested_tags  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_articles_added ON articles(added_at DESC);
@@ -44,6 +45,13 @@ CREATE TABLE IF NOT EXISTS article_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_article_tags_tag ON article_tags(tag_id);
+
+-- Settings the UI can change, so a key or a toggle does not mean editing the
+-- environment and restarting.
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
 
 -- Standalone (not external-content) so it survives article edits simply.
 CREATE VIRTUAL TABLE IF NOT EXISTS article_search USING fts5(
@@ -75,10 +83,22 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS will not
+# add them to a database that already exists, so do it by hand.
+ADDED_COLUMNS = (
+    ("articles", "suggested_tags", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
 def init_db(db_path: Path | str) -> None:
     conn = connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        for table, column, decl in ADDED_COLUMNS:
+            existing = {row["name"] for row in
+                        conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         conn.commit()
     finally:
         conn.close()
@@ -202,6 +222,7 @@ def list_articles(conn: sqlite3.Connection, status: str = "all",
     tag_map = tags_for_articles(conn, [a["id"] for a in articles])
     for article in articles:
         article["tags"] = tag_map.get(article["id"], [])
+        article["suggestions"] = get_suggestions(article)
     return articles
 
 
@@ -303,3 +324,81 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
         "unread": int(row["unread"] or 0),
         "read": int(row["read"] or 0),
     }
+
+
+# --------------------------------------------------------------------------
+# Settings
+# --------------------------------------------------------------------------
+
+# What the settings page may write, and what each becomes in the app config.
+SETTING_KEYS = ("ANTHROPIC_API_KEY", "LLM_TAGS_ENABLED", "AUTO_APPLY_TAGS",
+                "TAG_MODEL", "TAG_SUGGESTIONS")
+
+BOOL_SETTINGS = ("LLM_TAGS_ENABLED", "AUTO_APPLY_TAGS")
+INT_SETTINGS = ("TAG_SUGGESTIONS",)
+
+
+def get_settings(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Stored settings, typed. Absent keys are simply missing, so a caller
+    can tell "never set" from "set to off"."""
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    out: dict[str, Any] = {}
+    for row in rows:
+        key, raw = row["key"], row["value"]
+        if key not in SETTING_KEYS:
+            continue
+        if key in BOOL_SETTINGS:
+            out[key] = raw == "1"
+        elif key in INT_SETTINGS:
+            try:
+                out[key] = int(raw)
+            except ValueError:
+                continue
+        elif raw != "":
+            out[key] = raw
+    return out
+
+
+def set_settings(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
+    for key, value in values.items():
+        if key not in SETTING_KEYS:
+            continue
+        if key in BOOL_SETTINGS:
+            stored = "1" if value else "0"
+        else:
+            stored = "" if value is None else str(value)
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, stored),
+        )
+    conn.commit()
+
+
+# --------------------------------------------------------------------------
+# Suggested tags
+# --------------------------------------------------------------------------
+
+
+def get_suggestions(row: sqlite3.Row | dict[str, Any]) -> list[str]:
+    raw = (row["suggested_tags"] if "suggested_tags" in row.keys()
+           else "") if hasattr(row, "keys") else row.get("suggested_tags", "")
+    return [part for part in (chunk.strip() for chunk in (raw or "").split(","))
+            if part]
+
+
+def set_suggestions(conn: sqlite3.Connection, article_id: int,
+                    tags: Iterable[str]) -> None:
+    update_article(conn, article_id, suggested_tags=",".join(tags))
+
+
+def drop_suggestion(conn: sqlite3.Connection, article_id: int,
+                    name: str) -> list[str]:
+    """Remove one suggestion, e.g. because it was accepted. Returns the rest."""
+    row = get_article(conn, article_id)
+    if row is None:
+        return []
+    target = normalize_tag(name)
+    remaining = [t for t in get_suggestions(row) if normalize_tag(t) != target]
+    set_suggestions(conn, article_id, remaining)
+    return remaining

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}settings &middot; obomoboe{% endblock %}
+
+{% block content %}
+<div class="reader">
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
+  <h1>Settings</h1>
+
+  <form method="post" class="settings">
+    <section>
+      <h2>Tagging</h2>
+      <p class="hint">Every article gets candidate tags from whatever the
+        publisher declared plus the words the text leans on. That part needs
+        no key and works offline.</p>
+
+      <label class="row">
+        <input type="checkbox" name="auto_apply"
+               {{ 'checked' if config.AUTO_APPLY_TAGS }}>
+        <span>
+          <strong>Apply tags automatically</strong>
+          <em>Off by default: tags are offered on each article and you accept
+            the ones you want. Turned on, they are filed for you &mdash; quicker,
+            but your tag list fills up with whatever the pages say.</em>
+        </span>
+      </label>
+
+      <label class="row row--inline">
+        <span><strong>Suggestions per article</strong></span>
+        <input type="number" name="suggestions" min="0" max="12"
+               value="{{ config.TAG_SUGGESTIONS }}">
+      </label>
+    </section>
+
+    <section>
+      <h2>Claude</h2>
+      <p class="hint">Optional. With a key, Claude reads the article and
+        refines those candidates into something closer to how you would file
+        it. Without one, everything above still works.</p>
+
+      {% if not sdk_installed %}
+        <p class="notice">The <code>anthropic</code> package is not installed,
+          so this is unavailable. <code>pip install anthropic</code> to enable
+          it.</p>
+      {% endif %}
+
+      <label class="row">
+        <input type="checkbox" name="llm_tags"
+               {{ 'checked' if config.LLM_TAGS_ENABLED }}>
+        <span>
+          <strong>Use Claude to refine tags</strong>
+          <em>Costs a fraction of a cent per article. Falls back silently to
+            the offline tags if the call fails.</em>
+        </span>
+      </label>
+
+      <label class="row row--inline">
+        <span><strong>API key</strong></span>
+        <input type="text" name="api_key" autocomplete="off" spellcheck="false"
+               placeholder="sk-ant-…"
+               value="{{ masked_key }}">
+      </label>
+      {% if masked_key %}
+        <label class="row row--sub">
+          <input type="checkbox" name="clear_key">
+          <span><em>Remove the stored key</em></span>
+        </label>
+      {% endif %}
+      {% if key_from_env %}
+        <p class="hint">Currently coming from the <code>ANTHROPIC_API_KEY</code>
+          environment variable. Anything you save here takes precedence.</p>
+      {% endif %}
+      <p class="hint">Stored in plain text in <code>data/obomoboe.db</code>,
+        like everything else here. Fine on a machine only you use; not a
+        secret store.</p>
+
+      <label class="row row--inline">
+        <span><strong>Model</strong></span>
+        <input type="text" name="tag_model" autocomplete="off"
+               value="{{ config.TAG_MODEL }}">
+      </label>
+
+      <p class="status status--{{ 'on' if llm_ready else 'off' }}">
+        {% if llm_ready %}Claude tagging is active.
+        {% else %}Claude tagging is off &mdash; offline tags only.{% endif %}
+      </p>
+    </section>
+
+    <button type="submit" class="primary">Save settings</button>
+  </form>
+</div>
+{% endblock %}

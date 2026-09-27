@@ -45,6 +45,17 @@
     if (trigger.dataset.action === "add-tag") {
       showTagInput(item, trigger, id);
     }
+
+    if (trigger.dataset.action === "accept-suggestion") {
+      var name = trigger.dataset.tag;
+      trigger.disabled = true;
+      post("/a/" + id + "/suggestions/accept", { tag: name })
+        .then(function (data) {
+          trigger.remove();
+          renderTags(item, data.tags);
+        })
+        .catch(function () { trigger.disabled = false; });
+    }
   });
 
   function showTagInput(item, trigger, id) {
@@ -77,12 +88,13 @@
     container.querySelectorAll("a.chip").forEach(function (chip) {
       chip.remove();
     });
+    var firstSuggestion = container.querySelector(".chip--suggest");
     tags.forEach(function (name) {
       var chip = document.createElement("a");
       chip.className = "chip chip--sm";
       chip.href = "/?tag=" + encodeURIComponent(name);
       chip.textContent = name;
-      container.insertBefore(chip, add);
+      container.insertBefore(chip, firstSuggestion || add);
     });
   }
 

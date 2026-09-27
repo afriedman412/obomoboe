@@ -1,6 +1,7 @@
 """HTTP layer."""
 from __future__ import annotations
 
+import os
 import shutil
 import sqlite3
 from urllib.parse import urlparse
@@ -10,7 +11,7 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
                    render_template, request, send_from_directory, url_for)
 from markupsafe import Markup
 
-from . import archiver, db
+from . import archiver, db, tagging
 from .extract import archive_ph_submit_url, normalize_url
 
 bp = Blueprint("main", __name__)
@@ -21,6 +22,21 @@ SANDBOX_CSP = (
     "sandbox; default-src 'none'; img-src 'self' data:; "
     "style-src 'unsafe-inline'; font-src data:"
 )
+
+
+def live_config() -> dict:
+    """App config with stored settings applied.
+
+    Settings are read per request rather than at startup, so changing a key
+    or a toggle takes effect on the next article rather than the next
+    restart.
+    """
+    config = dict(current_app.config)
+    try:
+        config.update(db.get_settings(db.get_db()))
+    except sqlite3.Error:
+        current_app.logger.warning("could not read settings", exc_info=True)
+    return config
 
 
 def _wants_json() -> bool:
@@ -82,7 +98,7 @@ def add():
     for name in _split_tags(tags):
         db.add_tag(conn, article_id, name)
 
-    archiver.enqueue(dict(current_app.config), article_id)
+    archiver.enqueue(live_config(), article_id)
     return _add_response(article_id, "Added, archiving in the background", 201)
 
 
@@ -161,13 +177,13 @@ def capture():
     for name in _split_tags(tags):
         db.add_tag(conn, article_id, name)
 
-    path = archiver.capture_path(dict(current_app.config), article_id)
+    path = archiver.capture_path(live_config(), article_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")
 
     db.update_article(conn, article_id, archive_status=db.PENDING,
                       archive_error=None)
-    queued = archiver.enqueue(dict(current_app.config), article_id,
+    queued = archiver.enqueue(live_config(), article_id,
                               from_capture=True)
     return _cors(jsonify({"id": article_id, "queued": queued,
                           "message": "Captured from your browser"})), 201
@@ -182,6 +198,7 @@ def article(article_id: int):
 
     record = dict(row)
     record["tags"] = db.tags_for_articles(conn, [article_id]).get(article_id, [])
+    record["suggestions"] = db.get_suggestions(row)
 
     body = ""
     path = archiver.article_dir(current_app.config, article_id) / "readable.html"
@@ -285,14 +302,14 @@ def rearchive(article_id: int):
     # Re-reading a page your browser handed over means re-reading that page,
     # not going back to a server that could not fetch it in the first place.
     recapture = (not force
-                 and archiver.capture_path(dict(current_app.config),
+                 and archiver.capture_path(live_config(),
                                            article_id).exists())
     db.update_article(conn, article_id, archive_status=db.PENDING,
                       archive_error=None)
     # A run already underway will write the row when it lands, so the article
     # never gets stranded as pending -- but say so rather than pretending the
     # click started the run you asked for.
-    queued = archiver.enqueue(dict(current_app.config), article_id,
+    queued = archiver.enqueue(live_config(), article_id,
                               force_archive_ph=force, from_capture=recapture)
 
     if _wants_json():
@@ -342,7 +359,98 @@ def api_articles():
     tag_map = db.tags_for_articles(conn, [a["id"] for a in articles])
     for item in articles:
         item["tags"] = tag_map.get(item["id"], [])
+        item["suggestions"] = db.get_suggestions(item)
     return jsonify({"articles": articles, "counts": db.counts(conn)})
+
+
+def _mask(key: str) -> str:
+    """Enough to recognise a key by, not enough to use."""
+    key = (key or "").strip()
+    if not key:
+        return ""
+    return f"{key[:7]}…{key[-4:]}" if len(key) > 14 else "…" * 4
+
+
+@bp.route("/settings", methods=["GET", "POST"])
+def settings():
+    conn = db.get_db()
+
+    if request.method == "POST":
+        stored = db.get_settings(conn)
+        values: dict = {
+            "LLM_TAGS_ENABLED": bool(request.form.get("llm_tags")),
+            "AUTO_APPLY_TAGS": bool(request.form.get("auto_apply")),
+            "TAG_MODEL": ((request.form.get("tag_model") or "").strip()
+                          or "claude-opus-5"),
+        }
+        try:
+            count = int(request.form.get("suggestions", "6"))
+            values["TAG_SUGGESTIONS"] = max(0, min(12, count))
+        except ValueError:
+            pass
+
+        # An untouched field must not wipe the stored key -- the form only
+        # ever shows a masked version of it.
+        submitted = (request.form.get("api_key") or "").strip()
+        if request.form.get("clear_key"):
+            values["ANTHROPIC_API_KEY"] = ""
+        elif submitted and "…" not in submitted:
+            values["ANTHROPIC_API_KEY"] = submitted
+        elif "ANTHROPIC_API_KEY" in stored:
+            values["ANTHROPIC_API_KEY"] = stored["ANTHROPIC_API_KEY"]
+
+        db.set_settings(conn, values)
+        flash("Settings saved", "ok")
+        return redirect(url_for("main.settings"))
+
+    config = live_config()
+    key = tagging.api_key(config)
+    return render_template(
+        "settings.html",
+        config=config,
+        masked_key=_mask(key),
+        key_from_env=bool(os.environ.get("ANTHROPIC_API_KEY"))
+        and not db.get_settings(conn).get("ANTHROPIC_API_KEY"),
+        sdk_installed=tagging.sdk_installed(),
+        llm_ready=tagging.llm_available(config),
+    )
+
+
+@bp.post("/a/<int:article_id>/suggestions/accept")
+def accept_suggestion(article_id: int):
+    """Take one suggested tag. Anything not accepted stays on offer."""
+    conn = db.get_db()
+    if db.get_article(conn, article_id) is None:
+        abort(404)
+    name = (request.form.get("tag") or "").strip()
+    if name:
+        db.add_tag(conn, article_id, name)
+        db.drop_suggestion(conn, article_id, name)
+
+    row = db.get_article(conn, article_id)
+    if _wants_json():
+        return jsonify({
+            "id": article_id,
+            "tags": db.tags_for_articles(conn, [article_id]).get(article_id, []),
+            "suggestions": db.get_suggestions(row),
+        })
+    return redirect(request.referrer or url_for("main.article",
+                                                article_id=article_id))
+
+
+@bp.post("/a/<int:article_id>/suggestions/dismiss")
+def dismiss_suggestion(article_id: int):
+    conn = db.get_db()
+    if db.get_article(conn, article_id) is None:
+        abort(404)
+    name = (request.form.get("tag") or "").strip()
+    remaining = db.drop_suggestion(conn, article_id, name) if name else []
+    if not name:
+        db.set_suggestions(conn, article_id, [])
+    if _wants_json():
+        return jsonify({"id": article_id, "suggestions": remaining})
+    return redirect(request.referrer or url_for("main.article",
+                                                article_id=article_id))
 
 
 @bp.route("/bookmarklet")

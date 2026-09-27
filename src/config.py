@@ -50,6 +50,16 @@ def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
             if h.strip()
         ],
         "ARCHIVE_WORKERS": _env_int("OBOMOBOE_WORKERS", 2),
+        # Tagging. Everything here is overridable from the settings page;
+        # these are the defaults it starts from.
+        "TAG_SUGGESTIONS": _env_int("OBOMOBOE_TAG_SUGGESTIONS", 6),
+        "AUTO_APPLY_TAGS": _env_bool("OBOMOBOE_AUTO_APPLY_TAGS", False),
+        "LLM_TAGS_ENABLED": _env_bool("OBOMOBOE_LLM_TAGS", True),
+        "TAG_MODEL": os.environ.get("OBOMOBOE_TAG_MODEL", "claude-opus-5"),
+        "LLM_TAG_CHARS": _env_int("OBOMOBOE_LLM_TAG_CHARS", 6000),
+        # Read from the environment if it is there; the settings page can set
+        # it instead, and that takes precedence.
+        "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
         # Upper bound on a page captured by the bookmarklet. Rendered DOMs
         # run large; this is a guard against a runaway, not a target.
         "MAX_CAPTURE_BYTES": _env_int("OBOMOBOE_MAX_CAPTURE_BYTES", 12_000_000),

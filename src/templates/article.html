@@ -76,6 +76,23 @@
     <button type="submit">save</button>
   </form>
 
+  {% if article.suggestions %}
+    <div class="suggestions">
+      <span class="suggestions__label">suggested</span>
+      {% for name in article.suggestions %}
+        <form method="post"
+              action="{{ url_for('main.accept_suggestion', article_id=article.id) }}">
+          <input type="hidden" name="tag" value="{{ name }}">
+          <button type="submit" class="chip chip--suggest">{{ name }} +</button>
+        </form>
+      {% endfor %}
+      <form method="post"
+            action="{{ url_for('main.dismiss_suggestion', article_id=article.id) }}">
+        <button type="submit" class="suggestions__clear">dismiss all</button>
+      </form>
+    </div>
+  {% endif %}
+
   {% if body %}
     <div class="prose">{{ body }}</div>
   {% elif article.archive_status == 'pending' %}

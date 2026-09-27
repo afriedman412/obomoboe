@@ -22,7 +22,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from . import db
+from . import db, tagging
 from .extract import (Extracted, FetchError, dump_metadata, extract, fetch,
                       fetch_from_archive_ph, is_challenge_page,
                       looks_paywalled, strip_scripts)
@@ -108,6 +108,7 @@ def archive_article(config: dict[str, Any], article_id: int,
             archived_at=db.utcnow(),
         )
         db.index_article(conn, article_id, result.title or url, result.text)
+        _apply_tags(config, conn, article_id, result)
         return {"ok": True, "source": result.source,
                 "word_count": result.word_count, "note": note}
     except Exception as exc:  # a worker thread must never die silently
@@ -117,6 +118,36 @@ def archive_article(config: dict[str, Any], article_id: int,
         return {"ok": False, "error": str(exc)}
     finally:
         conn.close()
+
+
+def _apply_tags(config: dict[str, Any], conn: Any, article_id: int,
+                result: Extracted) -> None:
+    """Work out candidate tags, then either file them or offer them.
+
+    Never fatal: a tagging failure must not cost you the archive, which is
+    the part that cannot be recreated later.
+    """
+    try:
+        candidates = tagging.suggest(config, result.html, result.text,
+                                     result.title)
+    except Exception:
+        log.exception("tag suggestion failed for article %s", article_id)
+        return
+    if not candidates:
+        return
+
+    if config.get("AUTO_APPLY_TAGS"):
+        for name in candidates:
+            db.add_tag(conn, article_id, name)
+        db.set_suggestions(conn, article_id, [])
+        return
+
+    # Do not offer what is already filed.
+    applied = {db.normalize_tag(t) for t
+               in db.tags_for_articles(conn, [article_id]).get(article_id, [])}
+    db.set_suggestions(conn, article_id,
+                       [c for c in candidates
+                        if db.normalize_tag(c) not in applied])
 
 
 def _note(*parts: str | None) -> str | None:

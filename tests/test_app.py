@@ -310,3 +310,44 @@ class TestOriginalLinkOnPage:
         # Not merely linked -- the address itself is on the page.
         assert url in page
         assert 'rel="noreferrer noopener"' in page
+
+
+class TestSettingsPage:
+    def test_defaults_are_conservative(self, client):
+        page = client.get("/settings").get_data(as_text=True)
+        assert "Apply tags automatically" in page
+        # Auto-apply must be off unless the user turns it on.
+        assert "Claude tagging is off" in page
+
+    def test_saving_toggles_round_trips(self, client, conn):
+        client.post("/settings", data={"auto_apply": "on", "llm_tags": "on",
+                                       "suggestions": "4",
+                                       "tag_model": "claude-opus-5"})
+        stored = db.get_settings(conn)
+        assert stored["AUTO_APPLY_TAGS"] is True
+        assert stored["TAG_SUGGESTIONS"] == 4
+
+    def test_api_key_is_stored_and_shown_masked(self, client, conn):
+        client.post("/settings", data={"api_key": "sk-ant-secret-value-1234"})
+        assert db.get_settings(conn)["ANTHROPIC_API_KEY"] == \
+            "sk-ant-secret-value-1234"
+        page = client.get("/settings").get_data(as_text=True)
+        assert "sk-ant-secret-value-1234" not in page, "key shown in full"
+        assert "sk-ant-" in page and "1234" in page
+
+    def test_resubmitting_the_masked_value_keeps_the_key(self, client, conn):
+        """The form shows a mask; saving other settings must not wipe the key."""
+        client.post("/settings", data={"api_key": "sk-ant-secret-value-1234"})
+        masked = "sk-ant-…1234"
+        client.post("/settings", data={"api_key": masked, "auto_apply": "on"})
+        assert db.get_settings(conn)["ANTHROPIC_API_KEY"] == \
+            "sk-ant-secret-value-1234"
+
+    def test_key_can_be_cleared(self, client, conn):
+        client.post("/settings", data={"api_key": "sk-ant-secret-value-1234"})
+        client.post("/settings", data={"clear_key": "on"})
+        assert db.get_settings(conn).get("ANTHROPIC_API_KEY", "") == ""
+
+    def test_suggestion_count_is_clamped(self, client, conn):
+        client.post("/settings", data={"suggestions": "999"})
+        assert db.get_settings(conn)["TAG_SUGGESTIONS"] == 12

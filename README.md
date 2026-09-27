@@ -75,6 +75,31 @@ could also post to it — the app binds to `127.0.0.1`, and captured HTML is
 sanitized and sandboxed exactly like fetched HTML, but it is the reason this
 stays off any network you share.
 
+## Tags
+
+Every archived article gets candidate tags from two places that cost nothing
+and work offline: whatever the publisher declared (`article:tag`, JSON-LD
+`keywords` — only about a quarter of pages carry them) and the terms the text
+itself leans on, by frequency against a stoplist. The second is never clever.
+It finds *causal inference* and *street harassment*; it will also offer you
+*systems*.
+
+With an Anthropic API key, Claude reads the article and refines those
+candidates into something closer to how you would file it. It is entirely
+optional — without a key the offline tags carry on working, and if the call
+fails the article still archives with them.
+
+Tags are **suggested, not applied**: they appear as dashed chips on the
+article and in the list, and clicking one keeps it. Your taxonomy stays
+yours. Turn on *Apply tags automatically* in settings if you would rather
+they were filed for you.
+
+Configure all of it at `/settings` — the key, the toggles, how many
+suggestions per article, and which model. The key is stored in plain text in
+`data/obomoboe.db`, like everything else here; that is fine on a machine only
+you use, and it is not a secret store. An `ANTHROPIC_API_KEY` in the
+environment works too; the settings page takes precedence over it.
+
 ## Paywalls and archive.today
 
 If the live fetch returns very little text, or trips a paywall marker
@@ -90,7 +115,8 @@ The article page then offers a link that opens archive.today so you can create
 the snapshot by hand; hit **re-archive** afterwards and it will pick it up.
 
 Configuration is via environment variables: `OBOMOBOE_PORT`,
-`OBOMOBOE_MAX_CAPTURE_BYTES` (default 12MB),
+`OBOMOBOE_MAX_CAPTURE_BYTES` (default 12MB), `OBOMOBOE_AUTO_APPLY_TAGS`,
+`OBOMOBOE_TAG_MODEL`, `OBOMOBOE_TAG_SUGGESTIONS`, `OBOMOBOE_LLM_TAGS=0`,
 `OBOMOBOE_DATA_DIR`, `OBOMOBOE_MIN_WORDS` (paywall threshold, default 200),
 `OBOMOBOE_ARCHIVE_PH=0` to disable the fallback, `OBOMOBOE_ARCHIVE_IMAGES=0` to
 skip image downloads, `OBOMOBOE_WORKERS`.
@@ -103,4 +129,5 @@ skip image downloads, `OBOMOBOE_WORKERS`.
 | `src/db.py` | SQLite schema and queries |
 | `src/extract.py` | URL normalizing, fetching, readability, sanitizing, archive.today |
 | `src/archiver.py` | writes snapshots to disk, background worker pool |
+| `src/tagging.py` | candidate tags: publisher, keywords, Claude |
 | `src/config.py` | settings and env overrides |
