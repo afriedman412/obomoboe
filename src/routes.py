@@ -466,20 +466,44 @@ def dismiss_suggestion(article_id: int):
                                                 article_id=article_id))
 
 
+@bp.route("/capture/window")
+def capture_window():
+    """The small window the bookmarklet opens to hand a page over.
+
+    A fetch from the article's own page is subject to that page's
+    Content-Security-Policy, and a strict connect-src (nytimes.com allows
+    only https:) blocks it before it leaves the browser. postMessage into a
+    window on our origin is not governed by CSP, and from that window the
+    POST to /capture is same-origin.
+    """
+    return render_template("capture_window.html")
+
+
 @bp.route("/bookmarklet")
 def bookmarklet():
     base = request.url_root.rstrip("/")
     # Sends the page as your browser rendered it -- logged in, and past any
     # bot check -- instead of asking the server to go and fetch it blind.
+    # The handover goes through /capture/window rather than a direct fetch;
+    # see capture_window() for why. The listener is registered before the
+    # window opens so the ready ping cannot slip past it.
     code = (
         "javascript:(function(){"
-        "fetch('" + base + "/capture',{method:'POST',"
-        "headers:{'Content-Type':'application/json'},"
-        "body:JSON.stringify({url:location.href,"
-        "html:document.documentElement.outerHTML})})"
-        ".then(function(r){return r.json()})"
-        ".then(function(d){alert(d.error?('obomoboe: '+d.error):"
-        "'Saved to obomoboe')})"
-        ".catch(function(e){alert('obomoboe: '+e)});})();"
+        "var b='" + base + "',done=false,w;"
+        "function onMsg(e){"
+        "if(e.source!==w||!e.data||e.data.type!=='obomoboe-ready')return;"
+        "done=true;window.removeEventListener('message',onMsg);"
+        "w.postMessage({type:'obomoboe-capture',url:location.href,"
+        "html:document.documentElement.outerHTML},b);}"
+        "window.addEventListener('message',onMsg);"
+        "w=window.open(b+'/capture/window','obomoboe',"
+        "'popup,width=460,height=200');"
+        "if(!w){window.removeEventListener('message',onMsg);"
+        "alert('obomoboe: the browser blocked the save window -- allow "
+        "pop-ups for this site and try again');return;}"
+        "setTimeout(function(){if(done)return;"
+        "window.removeEventListener('message',onMsg);"
+        "alert('obomoboe: no answer from '+b+' -- is it running?');},8000);"
+        "})();"
     )
     return render_template("bookmarklet.html", code=code, base=base)

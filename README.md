@@ -69,11 +69,11 @@ Captured articles show as `via your browser`. Capturing a page while the bot
 check is still on screen is rejected rather than filed as the article, so wait
 for the piece to load before clicking.
 
-`/capture` sends CORS headers, because the bookmarklet posts from the
-article's own origin. That means any page you visit while the app is running
-could also post to it — the app binds to `127.0.0.1`, and captured HTML is
-sanitized and sandboxed exactly like fetched HTML, but it is the reason this
-stays off any network you share.
+`/capture` also sends CORS headers, so a page on another origin can post to
+it directly (the bookmarklet used to). That means any page you visit while
+the app is running could post to it — the app binds to `127.0.0.1`, and
+captured HTML is sanitized and sandboxed exactly like fetched HTML, but it is
+the reason this stays off any network you share.
 
 ## Tags
 

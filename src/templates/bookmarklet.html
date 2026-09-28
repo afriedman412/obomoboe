@@ -16,8 +16,11 @@
     <a class="bookmarklet-drag" href="{{ code }}">Save to obomoboe</a>
   </p>
   <p style="color: var(--muted); font-size: 13.5px;">
-    It posts the page to <code>{{ base }}/capture</code>, so it only works
-    while this app is running.
+    It opens a small window at <code>{{ base }}/capture/window</code> and
+    hands the page to it, so it only works while this app is running. If
+    your browser asks about pop-ups from a site, allow them &mdash; a fetch
+    straight from the article's page is blocked by many sites' security
+    policy, and the window is the way around that.
   </p>
 </div>
 {% endblock %}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>saving &middot; obomoboe</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    body { margin: 0; padding: 22px 24px; background: var(--paper); color: var(--ink);
+           font-family: var(--serif); }
+    .capture-status { font-size: 17px; margin: 0 0 10px; }
+    .capture-status--error { color: var(--danger); }
+    .capture-detail { color: var(--muted); font-size: 13.5px; margin: 0;
+                      word-break: break-word; }
+  </style>
+</head>
+<body>
+  <p class="capture-status" id="status">Waiting for the page&hellip;</p>
+  <p class="capture-detail" id="detail"></p>
+  <script>
+  // The bookmarklet cannot post to us from the article's page: sites like
+  // nytimes.com send a Content-Security-Policy whose connect-src allows only
+  // https:, which blocks any fetch to http://127.0.0.1 before it leaves the
+  // page. So the bookmarklet opens this window on our own origin and hands
+  // the page over with postMessage, which CSP does not govern. From here the
+  // POST to /capture is same-origin and nothing stands in its way.
+  (function () {
+    var status = document.getElementById('status');
+    var detail = document.getElementById('detail');
+    function show(text, extra, isError) {
+      status.textContent = text;
+      status.className = 'capture-status' + (isError ? ' capture-status--error' : '');
+      detail.textContent = extra || '';
+    }
+    if (!window.opener) {
+      show('Nothing to save here.',
+           'The bookmarklet opens this window. Click it on the article you want to save.',
+           true);
+      return;
+    }
+    var received = false;
+    window.addEventListener('message', function (event) {
+      if (received || event.source !== window.opener) return;
+      var data = event.data || {};
+      if (data.type !== 'obomoboe-capture') return;
+      received = true;
+      show('Saving…', data.url);
+      fetch('{{ url_for("main.capture") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({url: data.url, html: data.html})
+      }).then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.error) { show('obomoboe could not save this page.', d.error, true); return; }
+          show('Saved to obomoboe.', data.url);
+          setTimeout(function () { window.close(); }, 1200);
+        })
+        .catch(function (e) { show('obomoboe could not save this page.', String(e), true); });
+    });
+    // The opener has no way to know when this window is listening, so tell it.
+    window.opener.postMessage({type: 'obomoboe-ready'}, '*');
+  })();
+  </script>
+</body>
+</html>

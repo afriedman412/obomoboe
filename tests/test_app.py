@@ -223,12 +223,31 @@ class TestCapture:
         assert resp.status_code == 400
 
     def test_browser_may_send_and_read_the_reply(self, client):
-        """Without these the bookmarklet's fetch is blocked by the browser."""
+        """Cross-origin posts to /capture -- the documented API -- need these.
+        The bookmarklet itself now posts same-origin from /capture/window."""
         pre = client.open("/capture", method="OPTIONS")
         assert pre.status_code == 204
         assert pre.headers["Access-Control-Allow-Origin"] == "*"
         assert "POST" in pre.headers["Access-Control-Allow-Methods"]
         assert self._capture(client).headers["Access-Control-Allow-Origin"] == "*"
+
+    def test_bookmarklet_hands_over_through_a_window_on_our_origin(self, client):
+        """A fetch from the article's page is blocked by a strict
+        connect-src (nytimes.com allows only https:), so the bookmarklet
+        must not fetch /capture directly from there."""
+        page = client.get("/bookmarklet").get_data(as_text=True)
+        href = BeautifulSoup(page, "html.parser").select_one(
+            ".bookmarklet-drag")["href"]
+        assert href.startswith("javascript:")
+        assert "/capture/window" in href
+        assert "postMessage" in href
+        assert "fetch(" not in href
+
+    def test_capture_window_posts_same_origin(self, client):
+        page = client.get("/capture/window").get_data(as_text=True)
+        assert "obomoboe-ready" in page
+        assert "obomoboe-capture" in page
+        assert "fetch('/capture'" in page
 
     def test_captured_bot_check_is_refused_not_filed(self, client, app, conn):
         """Capturing exists to get past a challenge; a captured challenge is
