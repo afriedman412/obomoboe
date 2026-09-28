@@ -1,8 +1,10 @@
 import pytest
 
-from src.extract import (Extracted, extract,
+from bs4 import BeautifulSoup
+
+from src.extract import (Extracted, drop_leading_title, extract,
                          is_challenge_page, looks_paywalled, normalize_url,
-                         sanitize_fragment)
+                         sanitize_fragment, strip_chrome)
 
 ARTICLE_HTML = """
 <html><head>
@@ -275,3 +277,123 @@ class TestAuthorExtraction:
     def test_handles_are_not_bylines(self):
         page = self._page("<meta name='author' content='@someaccount'>")
         assert extract(page, "https://example.com/p").author is None
+
+
+def _prose(label: str, n: int = 12) -> str:
+    return "".join(f"<p>{label} paragraph {i} carries real article words "
+                   f"for the reader to keep and enjoy at length.</p>"
+                   for i in range(n))
+
+
+class TestChromeStripping:
+    """Menus, recirculation and the like are cut out before extraction.
+
+    Modelled on nytimes.com, whose mobile navigation -- 900 words of
+    newsletter blurbs -- sits in a <dialog> eleven levels deep, well past
+    the six ancestors the block collector used to check, followed by
+    "Explore" and "Trending" lists in role=complementary and
+    data-testid=recirculation sections. All of it was archived as the piece.
+    """
+
+    MENU = "".join(
+        f"<li><a href='/n{i}'><div>Letter {i}</div><p>Make sense of the "
+        f"day's news and ideas with newsletter number {i} today.</p></a></li>"
+        for i in range(40))
+
+    PAGE = f"""
+    <html><head><title>The Piece</title>
+    <meta property="og:title" content="The Piece"></head><body>
+    <div><div><div><div data-testid="masthead-container">
+      <dialog id="mobile-hamburger"><nav data-testid="mobile-nav">
+        <ul><li><div aria-hidden="true" data-testid="hamburger-pane-U.S.">
+          <div><div><div><ul>{MENU}</ul></div></div></div>
+        </div></li></ul>
+      </nav></dialog>
+    </div></div></div></div>
+    <main id="site-content"><article id="story">
+      <header><h1>The Piece</h1><p>A subtitle for the piece here.</p></header>
+      <section name="articleBody">
+        <div data-testid="StoryAd"><p>Advertisement</p></div>
+        {_prose("Body")}
+        <aside><ol aria-label="Comments"><li><p>Reader comment saying
+          something nixilating about the piece here.</p></li></ol></aside>
+      </section>
+      <section role="complementary"><h2>Explore The Magazine</h2>
+        <ul><li><p>They Kept Outsiders Away for 500 Years and more.</p></li>
+        </ul></section>
+      <section data-testid="recirculation"><h3>Trending in The Times</h3>
+        <ul><li><p>Five Gastrointestinal Symptoms You Should Never Ignore.
+        </p></li></ul></section>
+      <div id="bottom-slug"><p>Advertisement</p></div>
+    </article></main>
+    <footer><p>copyright notice goes here all rights reserved</p></footer>
+    </body></html>
+    """
+
+    def test_menu_deep_in_a_dialog_is_not_the_article(self):
+        text = extract(self.PAGE, "https://example.com/p").text
+        assert "Body paragraph 3" in text
+        assert "Make sense of the day" not in text
+        assert "newsletter number" not in text
+
+    def test_recirculation_and_complementary_sections_are_dropped(self):
+        text = extract(self.PAGE, "https://example.com/p").text
+        assert "Kept Outsiders Away" not in text
+        assert "Gastrointestinal" not in text
+
+    def test_comments_and_ad_labels_are_dropped(self):
+        text = extract(self.PAGE, "https://example.com/p").text
+        assert "nixilating" not in text
+        assert "Advertisement" not in text
+
+    def test_headline_is_not_repeated_in_the_reader_view(self):
+        result = extract(self.PAGE, "https://example.com/p")
+        assert result.title == "The Piece"
+        assert "<h1>" not in result.readable_html
+        assert "Body paragraph 0" in result.readable_html
+
+    def test_a_named_wrapper_holding_the_article_survives(self):
+        """Substack's post is <article class="newsletter-post">; Variety's
+        body sits in <div class="pmc-not-a-paywall">. Both vanished."""
+        page = (f"<html><body><div class='comments-page'>"
+                f"<article class='typography newsletter-post post'>"
+                f"<div class='pmc-not-a-paywall'>{_prose('Post')}</div>"
+                f"</article></div>"
+                f"<div class='comment'><p>a reader comment with several "
+                f"words in it here</p></div></body></html>")
+        text = extract(page, "https://x.substack.com/p/a").text
+        assert "Post paragraph 5" in text
+        assert "reader comment" not in text
+
+    def test_headings_and_in_article_headers_are_kept(self):
+        """Variety titles each film in a "...__header" div; Substack
+        headings carry class "header-anchor-post"."""
+        page = (f"<html><body><article>"
+                f"<h2 class='header-anchor-post'>Why Boring?</h2>"
+                f"<div class='c-gallery-vertical-featured-image__header'>"
+                f"<h2>Dead Man's Wire</h2></div>{_prose('Film')}"
+                f"</article></body></html>")
+        text = extract(page, "https://example.com/p").text
+        assert "Why Boring?" in text
+        assert "Dead Man's Wire" in text
+
+    def test_names_are_matched_as_whole_tokens(self):
+        soup = BeautifulSoup(
+            "<html><body><div class='canvas-address'><p>kept words</p></div>"
+            "<div class='ad-slot'><p>Advertisement text</p></div>"
+            "</body></html>", "lxml")
+        cleaned = str(strip_chrome(soup))
+        assert "kept words" in cleaned
+        assert "Advertisement text" not in cleaned
+
+    def test_nothing_holding_most_of_the_page_is_removed(self):
+        soup = BeautifulSoup(
+            f"<html><body><div id='comments-wrapper'>{_prose('All')}</div>"
+            "</body></html>", "lxml")
+        assert "All paragraph 3" in str(strip_chrome(soup))
+
+    def test_drop_leading_title_only_touches_a_matching_heading(self):
+        fragment = "<h2>Something Else</h2><p>text</p>"
+        assert drop_leading_title(fragment, "The Piece") == fragment
+        assert "<h2>" not in drop_leading_title(
+            "<h2>The Piece</h2><p>text</p>", "The Piece")

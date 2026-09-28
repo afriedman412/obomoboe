@@ -283,17 +283,23 @@ def extract(html: str, url: str, status_code: int = 200,
     result = Extracted(url=url, html=html, status_code=status_code,
                        source=source, headers=dict(headers or {}))
 
+    soup = BeautifulSoup(html, "lxml")
+    # Menus, recirculation and the like are cut out before either extractor
+    # sees the page; see strip_chrome. Metadata is still read from the
+    # untouched document.
+    cleaned = strip_chrome(BeautifulSoup(html, "lxml"))
+    cleaned_html = str(cleaned)
+
     readable = trafilatura.extract(
-        html, url=url, output_format="html", include_links=True,
+        cleaned_html, url=url, output_format="html", include_links=True,
         include_images=True, include_formatting=True, include_tables=True,
         favor_recall=True,
     ) or ""
-    result.text = trafilatura.extract(html, url=url, favor_recall=True) or ""
-
-    soup = BeautifulSoup(html, "lxml")
+    result.text = trafilatura.extract(cleaned_html, url=url,
+                                      favor_recall=True) or ""
 
     # A single-container reading can miss most of a block-built article.
-    blocks = collect_blocks(soup)
+    blocks = collect_blocks(cleaned)
     block_text = BeautifulSoup(blocks, "lxml").get_text(" ", strip=True)
     if len(block_text.split()) > len(result.text.split()) * 1.4:
         readable, result.text = blocks, block_text
@@ -338,6 +344,10 @@ def extract(html: str, url: str, status_code: int = 200,
     if not result.text and result.readable_html:
         result.text = BeautifulSoup(result.readable_html, "lxml").get_text(" ")
 
+    result.readable_html = drop_leading_title(result.readable_html,
+                                              result.title)
+    result.text = dedupe_head(result.text)
+
     result.images = _image_urls(result.readable_html, url)
     return result
 
@@ -363,24 +373,233 @@ def _image_urls(fragment: str, base_url: str) -> list[str]:
 # came back as 444 of its 1279 words, starting mid-sentence. When that happens,
 # collect the blocks ourselves and keep whichever copy recovered more.
 
-BOILERPLATE_HINTS = (
-    "newsletter", "subscribe", "signup", "sign-up", "related", "recirc",
-    "footer", "nav", "menu", "social", "share", "comment", "promo",
-    "advert", "cookie", "banner", "sidebar", "breadcrumb", "caption",
-)
+# Naming used for page furniture. Matched as whole tokens of an id, class
+# or data-testid (split on punctuation and camelCase), never as substrings:
+# "nav" must not hit "canvas", nor "ad" hit "address".
+CHROME_TOKENS = {
+    "nav", "navbar", "navigation", "menu", "submenu", "hamburger", "masthead",
+    "header", "footer", "sidebar", "rail", "rightrail", "leftrail",
+    "recirc", "recirculation", "related", "trending", "popular", "morein",
+    "readmore", "readnext", "promo", "promotion", "outbrain", "taboola",
+    "newsletter", "subscribe", "signup",
+    "social", "share", "sharing", "sharebar", "comment", "comments",
+    "ad", "ads", "adslot", "advert", "advertisement", "advertising",
+    "cookie", "cookies", "consent", "banner", "breadcrumb", "breadcrumbs",
+    "modal", "popup", "overlay", "toast", "skip",
+}
+# Prefix matches, for compound tokens like "recirc-collection" the token split
+# leaves intact ("recirccollection" never occurs; "recirc" does) and hashed
+# names that keep a readable stem ("newsletterSignup").
+CHROME_PREFIXES = ("recirc", "newsletter", "advert", "sharebar", "breadcrumb")
+
+# Blocks whose whole text is one of these are labels on furniture, not prose.
+CHROME_LABELS = {
+    "advertisement", "advertisements", "supported by", "sponsored",
+    "sponsored content", "paid post", "paid content", "skip to content",
+    "skip to main content", "continue reading the main story",
+    "read more", "share this article", "share full article",
+}
+LABEL_BLOCKS = {"p", "div", "span", "a", "li", "section", "h1", "h2", "h3",
+                "h4", "h5", "h6", "small", "strong", "em"}
+
+CHROME_TAGS = {"nav", "footer", "aside", "dialog", "form", "menu", "template"}
+CHROME_ROLES = {"navigation", "banner", "contentinfo", "complementary",
+                "dialog", "alertdialog", "menu", "menubar", "search"}
+
+# Kept for the block collector's per-element check.
+BOILERPLATE_HINTS = CHROME_TOKENS
 
 BLOCK_TAGS = ("p", "blockquote", "h2", "h3", "h4", "li", "pre")
 
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _name_tokens(tag: Any) -> set[str]:
+    """Words in an element's id, class and data-testid, lowercased."""
+    parts: list[str] = []
+    for attr in ("id", "class", "data-testid", "data-test", "data-module"):
+        value = tag.get(attr)
+        if not value:
+            continue
+        parts.extend(value if isinstance(value, list) else [str(value)])
+    joined = _CAMEL.sub(" ", " ".join(parts)).lower()
+    return {token for token in _SPLIT.split(joined) if token}
+
+
+# Names that negate the hint next to them: Variety's body copy sits in
+# <div class="pmc-not-a-paywall">, and its whole article went with it.
+NEGATIONS = {"not", "no", "non", "without"}
+
+# Structural words that mean something else inside the piece. Variety's
+# film titles sit in "c-gallery-vertical-featured-image__header"; Substack
+# headings are <h2 class="header-anchor-post">. Outside the article these
+# still name the masthead and the site footer.
+STRUCTURAL_TOKENS = {"header", "footer"}
+
+HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+
+def _named_as_chrome(tag: Any, in_article: bool = False) -> bool:
+    if tag.name in HEADINGS:
+        return False
+    tokens = _name_tokens(tag)
+    if tokens & NEGATIONS:
+        return False
+    hits = tokens & CHROME_TOKENS
+    if in_article:
+        hits -= STRUCTURAL_TOKENS
+    if hits:
+        return True
+    return any(token.startswith(CHROME_PREFIXES) for token in tokens)
+
+
+def _holds_article(tag: Any) -> bool:
+    """Is this the article container, or a wrapper around it?
+
+    Naming is too weak a signal to throw away the piece itself: a Substack
+    post is <article class="newsletter-post">, and Variety wraps its body
+    in the class above. Landmarks and roles still apply to these.
+    """
+    name = getattr(tag, "name", "") or ""
+    if name in ("article", "main", "body"):
+        return True
+    if str(tag.get("role") or "").lower() in ("main", "article"):
+        return True
+    return tag.find(["article", "main"]) is not None
+
+
+def _is_chrome_element(tag: Any, in_article: bool = False) -> bool:
+    """Is this element itself page furniture?
+
+    A header outside the article is the masthead; inside it is the headline
+    and byline, which are left alone.
+    """
+    name = getattr(tag, "name", "") or ""
+    if not name or not hasattr(tag, "get"):
+        return False
+    if name in CHROME_TAGS:
+        return True
+    if name == "header" and not in_article:
+        return True
+    role = str(tag.get("role") or "").lower()
+    if role in CHROME_ROLES:
+        return True
+    if tag.has_attr("hidden") or str(tag.get("aria-hidden")).lower() == "true":
+        return True
+    return not _holds_article(tag) and _named_as_chrome(tag, in_article)
+
+
+def _word_count(tag: Any) -> int:
+    return len(tag.get_text(" ", strip=True).split())
+
+
+def strip_chrome(soup: BeautifulSoup) -> BeautifulSoup:
+    """Cut page furniture out of a document before extraction.
+
+    Readability heuristics work on text density and are easily fooled by a
+    site menu full of blurbs. nytimes.com renders its entire mobile
+    navigation -- 900 words of newsletter and podcast descriptions -- inside
+    a <dialog> eleven levels deep, followed by "Explore the magazine" and
+    "Trending" lists in sections marked role=complementary and
+    data-testid=recirculation. All of it came through as the article.
+
+    Landmark tags, ARIA roles, hidden state and naming carry the decision.
+    Nothing holding most of the page's words is removed, whatever it is
+    called: a wrapper with "gateway" or "comments" in its id that happens to
+    contain the article must survive.
+    """
+    body = soup.body or soup
+    total = _word_count(body)
+    ceiling = max(total // 2, 1)
+    for tag in list(body.find_all(True)):
+        if tag.decomposed or not tag.parent:
+            continue
+        in_article = any(getattr(parent, "name", "") in ("article", "main")
+                         for parent in tag.parents)
+        if not _is_chrome_element(tag, in_article):
+            continue
+        if _word_count(tag) > ceiling:
+            continue
+        tag.decompose()
+    _strip_labels(body)
+    return soup
+
+
+def _strip_labels(body: Any) -> None:
+    """Remove blocks that say nothing but "Advertisement" and the like.
+
+    Works up from the matching text node to the outermost block that still
+    reads as just the label, so the wrapper goes too and no empty <p> is
+    left behind.
+    """
+    for node in list(body.find_all(string=True)):
+        text = " ".join(str(node).split()).lower()
+        if text not in CHROME_LABELS or not node.parent:
+            continue
+        doomed = None
+        for element in node.parents:
+            name = getattr(element, "name", "") or ""
+            if name not in LABEL_BLOCKS:
+                break
+            if " ".join(element.get_text(" ", strip=True).split()).lower() != text:
+                break
+            doomed = element
+        (doomed if doomed is not None else node).extract()
+
+
+def drop_leading_title(fragment: str, title: str | None) -> str:
+    """Take the headline out of the reader view when it opens with one.
+
+    The article page already prints the title above the text; a heading
+    that repeats it is noise. Only a heading among the first few elements
+    is considered, and only when it says the same thing as the title.
+    """
+    if not fragment or not title:
+        return fragment
+    wanted = " ".join(title.split()).lower()
+    soup = BeautifulSoup(fragment, "lxml")
+    body = soup.body or soup
+    dropped = False
+    # More than one can match: nytimes.com renders a desktop and a mobile
+    # header, each with the headline.
+    for element in list(body.find_all(True))[:8]:
+        if element.name not in HEADINGS:
+            continue
+        heading = " ".join(element.get_text(" ", strip=True).split()).lower()
+        if heading == wanted or (len(heading) > 20 and heading in wanted) \
+                or (len(wanted) > 20 and wanted in heading):
+            element.decompose()
+            dropped = True
+    return body.decode_contents() if dropped else fragment
+
+
+def dedupe_head(text: str, lines: int = 10) -> str:
+    """Drop a line repeated near the top of the text, case-insensitively.
+
+    Two headers on one page means the kicker and the headline each appear
+    twice in the plain text, which then counts double and searches double.
+    """
+    head, tail = text.split("\n")[:lines], text.split("\n")[lines:]
+    seen: set[str] = set()
+    kept: list[str] = []
+    for line in head:
+        key = " ".join(line.split()).lower()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        kept.append(line)
+    return "\n".join(kept + tail)
+
 
 def _is_chrome(tag: Any) -> bool:
-    """Is this element page furniture rather than the article?"""
-    for element in [tag, *list(tag.parents)[:6]]:
+    """Is this element page furniture, or inside some?"""
+    in_article = False
+    for element in [tag, *tag.parents]:
         name = getattr(element, "name", "") or ""
-        if name in ("nav", "footer", "header", "aside", "form"):
-            return True
-        classes = element.get("class") or [] if hasattr(element, "get") else []
-        ident = " ".join(list(classes) + [str(element.get("id") or "")]).lower()
-        if any(hint in ident for hint in BOILERPLATE_HINTS):
+        if name in ("article", "main"):
+            in_article = True
+        if _is_chrome_element(element, in_article):
             return True
     return False
 

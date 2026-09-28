@@ -51,12 +51,33 @@ data/archives/<id>/assets/         images, downloaded so they can't rot
 
 Search is SQLite FTS5 over the full text, not just titles.
 
+Before the readability pass, page furniture is cut out of the document:
+`nav`, `footer`, `aside`, `dialog` and `form` elements, anything with a
+landmark role such as `complementary` or `navigation`, hidden elements, and
+containers whose id, class or `data-testid` names them as a menu,
+recirculation list, newsletter box, comment thread, ad slot or the like.
+Names are matched as whole words, a name containing "not" is ignored, and
+nothing holding most of the page's text is ever removed, so an article that
+happens to sit in `<article class="newsletter-post">` or a
+`pmc-not-a-paywall` div survives. This exists because nytimes.com renders its
+entire mobile menu, 900 words of blurbs, into every page, and readability
+heuristics happily took that as the article.
+
 ## Capturing from your browser
 
 A server-side fetch runs from this machine with no session and no way through
-a bot check. Your browser has both. So the bookmarklet posts
+a bot check. Your browser has both. So the bookmarklet hands
 `document.documentElement.outerHTML` to `/capture`, and the archiver extracts
 from that instead of fetching anything.
+
+It does this through a small pop-up window on the app's own origin
+(`/capture/window`) rather than posting straight from the article's page. A
+fetch from the page is subject to that page's Content-Security-Policy, and a
+strict `connect-src` — nytimes.com allows only `https:` — blocks a request to
+`http://127.0.0.1` before it leaves the browser, which surfaces as
+`TypeError: Failed to fetch`. `postMessage` into a window on our origin is
+not governed by CSP, and from that window the post is same-origin. If your
+browser blocks the pop-up, allow pop-ups for that site.
 
 This is the only thing that works for sites that refuse the server outright.
 Medium, for instance, answers a plain fetch with HTTP 403 and
