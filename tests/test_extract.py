@@ -4,7 +4,8 @@ from bs4 import BeautifulSoup
 
 from src.extract import (Extracted, drop_leading_title, extract,
                          is_challenge_page, looks_paywalled, normalize_url,
-                         sanitize_fragment, snapshot_urls, strip_chrome)
+                         sanitize_fragment, snapshot_urls, strip_chrome,
+                         strip_site_suffix)
 
 ARTICLE_HTML = """
 <html><head>
@@ -433,3 +434,92 @@ class TestSnapshotUrls:
         result = extract(page, "https://archive.ph/TazWD")
         assert result.site_name == "stltoday.com"
         assert result.original_url == "https://www.stltoday.com/news/a.html"
+
+
+def _snapshot(original: str, head: str, body: str,
+              stamp: str = "2022.11.23-130517") -> str:
+    """A trimmed archive.today page: its rewritten tags, its own header with
+    the capture time, then the archived page."""
+    return (
+        f"<html><head><link rel='canonical' href='https://archive.ph/{stamp}/"
+        f"{original}'><meta property='og:url' content='https://archive.ph/Ab1'>"
+        f"<meta property='article:published_time' content='2022-11-23T13:05:17Z'>"
+        f"{head}</head><body><div id='HEADER'><time datetime='2022-11-23T13:05:17Z'>"
+        f"23 Nov 2022 13:05:17 UTC</time></div><div id='CONTENT'>{body}"
+        + "<p>ordinary article words carrying the piece along here</p>" * 40
+        + "</div></body></html>")
+
+
+class TestSnapshotTitleAndDate:
+    """archive.today cuts titles at 70 characters and stamps every date tag
+    with the capture time, so a saved snapshot showed a truncated title
+    and the day it was archived as the day it was published."""
+
+    def test_truncated_title_is_completed_from_the_page(self):
+        page = _snapshot(
+            "https://www.stltoday.com/news/a.html",
+            "<title>Police were unlicensed. A burglary case was dismissed as a "
+            "result.</title><meta property='og:title' content='Police were "
+            "unlicensed. A burglary case was dismis…'>",
+            "<h1>Police were unlicensed. A burglary case was dismissed as a "
+            "result.</h1>")
+        result = extract(page, "https://archive.ph/Ab1")
+        assert result.title == ("Police were unlicensed. A burglary case was "
+                                "dismissed as a result.")
+
+    def test_site_suffix_is_dropped(self):
+        assert strip_site_suffix("War Bros | WIRED",
+                                 "https://www.wired.com/story/x") == "War Bros"
+        assert strip_site_suffix("Dril speaks - The Washington Post",
+                                 "https://www.washingtonpost.com/x") \
+            == "Dril speaks"
+        assert strip_site_suffix("Latimore Dies - The New York Times",
+                                 "https://www.nytimes.com/x") == "Latimore Dies"
+
+    def test_a_dash_that_is_not_the_site_stays(self):
+        assert strip_site_suffix("Rust - A Love Story",
+                                 "https://example.com/x") == "Rust - A Love Story"
+
+    def test_dateline_beats_the_capture_time(self):
+        page = _snapshot(
+            "https://www.washingtonpost.com/technology/2022/11/22/dril/",
+            "<meta property='og:title' content='Dril speaks'>",
+            "<h1>Dril speaks</h1><p>By Taylor Lorenz</p>"
+            "<p>November 23, 2022 at 5:00 a.m. EST</p>")
+        result = extract(page, "https://archive.ph/Ab1")
+        assert result.published_at == "2022-11-23T05:00:00-05:00"
+
+    def test_embedded_posts_older_than_the_url_date_are_passed_over(self):
+        page = _snapshot(
+            "https://www.washingtonpost.com/technology/2022/11/22/dril/",
+            "", "<blockquote><time datetime='2016-01-07T23:39:46.000Z'>"
+                "Jan 7, 2016</time></blockquote>"
+                "<p>November 23, 2022 at 5:00 a.m. EST</p>")
+        result = extract(page, "https://archive.ph/Ab1")
+        assert result.published_at.startswith("2022-11-23")
+
+    def test_numeric_date_is_read_the_way_the_url_agrees_with(self):
+        page = _snapshot("https://jacobin.com/2022/12/bowling",
+                         "", "<time>12.05.2022</time>",
+                         stamp="2022.12.13-205349")
+        assert extract(page, "https://archive.ph/Ab1").published_at \
+            == "2022-12-05"
+
+    def test_no_date_at_all_is_left_empty_not_the_capture_time(self):
+        page = _snapshot("https://example.com/piece", "", "")
+        assert extract(page, "https://archive.ph/Ab1").published_at is None
+
+    def test_url_date_is_the_last_resort(self):
+        page = _snapshot("https://example.com/2022/11/20/piece", "", "")
+        assert extract(page, "https://archive.ph/Ab1").published_at \
+            == "2022-11-20"
+
+    def test_ordinary_pages_keep_their_metadata(self):
+        page = ("<html><head><title>Sourdough - Wikipedia</title><meta "
+                "property='article:published_time' "
+                "content='2026-02-03T10:00:00Z'></head><body><article>"
+                + "<p>ordinary article words here</p>" * 30
+                + "</article></body></html>")
+        result = extract(page, "https://en.wikipedia.org/wiki/Sourdough")
+        assert result.original_url is None
+        assert result.published_at.startswith("2026-02-03T10:00")

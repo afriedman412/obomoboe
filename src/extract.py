@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 from urllib.parse import (parse_qsl, quote, urlencode, urljoin, urlparse,
@@ -15,7 +15,8 @@ from urllib.parse import (parse_qsl, quote, urlencode, urljoin, urlparse,
 
 import requests
 import trafilatura
-from bs4 import BeautifulSoup
+from zoneinfo import ZoneInfo
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 # Query params that are pure tracking noise; dropped when de-duplicating URLs.
 TRACKING_PARAMS = re.compile(
@@ -34,7 +35,8 @@ ARCHIVE_TODAY_HOSTS = {
 
 # A snapshot's canonical link: https://archive.ph/2022.11.23-130517/<original>
 SNAPSHOT_CANONICAL = re.compile(
-    r"^https?://(?:www\.)?(?P<host>[a-z.]+)/\d{4}\.\d{2}\.\d{2}-\d{6}/"
+    r"^https?://(?:www\.)?(?P<host>[a-z.]+)/"
+    r"(?P<stamp>\d{4}\.\d{2}\.\d{2}-\d{6})/"
     r"(?P<original>https?://.+)$", re.IGNORECASE)
 
 PAYWALL_MARKERS = (
@@ -421,6 +423,16 @@ def extract(html: str, url: str, status_code: int = 200,
             soup, "article:published_time", "datePublished"
         )
 
+    if snapshot is not None:
+        # archive.today rewrites every title and date tag on the page: the
+        # titles are cut at 70 characters and both published and modified
+        # times are set to the moment of capture. Read them off the
+        # archived page instead.
+        title, published = snapshot_title_and_date(
+            html, result.title, result.original_url or url)
+        result.title = title or result.title
+        result.published_at = published
+
     if not result.text and result.readable_html:
         result.text = BeautifulSoup(result.readable_html, "lxml").get_text(" ")
 
@@ -801,6 +813,237 @@ def looks_paywalled(result: Extracted, min_words: int = 200) -> bool:
         return True
     # Little text and no obvious marker still smells like a stub.
     return result.word_count < min_words
+
+
+# --------------------------------------------------------------------------
+# Title and date of an archive.today snapshot
+# --------------------------------------------------------------------------
+
+_MONTHS = {name: number for number, names in enumerate(
+    (("jan", "january"), ("feb", "february"), ("mar", "march"),
+     ("apr", "april"), ("may",), ("jun", "june"), ("jul", "july"),
+     ("aug", "august"), ("sep", "sept", "september"), ("oct", "october"),
+     ("nov", "november"), ("dec", "december")), start=1) for name in names}
+_MONTH = (r"(?P<month>jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+          r"june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|"
+          r"nov(?:ember)?|dec(?:ember)?)\.?")
+_CLOCK = (r"(?:,?\s*(?:at\s+)?(?P<hour>\d{1,2}):(?P<minute>\d{2})\s*"
+          r"(?P<ampm>[ap]\.?\s?m\.?)?\s*(?P<tz>[ECMP][SD]?T|UTC|GMT)?)?")
+_YEAR = r"(?P<year>(?:19|20)\d{2})"
+DATELINES = (
+    # November 23, 2022 at 5:00 a.m. EST / Sept. 5, 2026, 3:58 p.m. ET
+    re.compile(rf"\b{_MONTH}\s+(?P<day>\d{{1,2}}),?\s+{_YEAR}\b{_CLOCK}",
+               re.IGNORECASE),
+    # 5 September 2026
+    re.compile(rf"\b(?P<day>\d{{1,2}})\s+{_MONTH}\s+{_YEAR}\b{_CLOCK}",
+               re.IGNORECASE),
+)
+# 12.05.2022 -- read both ways; the URL usually settles which is meant.
+NUMERIC_DATE = re.compile(r"\b(\d{1,2})[./](\d{1,2})[./]((?:19|20)\d{2})\b")
+URL_DATE = re.compile(r"/((?:19|20)\d{2})/(\d{1,2})(?:/(\d{1,2}))?/")
+_ZONES = {
+    "et": "America/New_York", "ct": "America/Chicago",
+    "mt": "America/Denver", "pt": "America/Los_Angeles",
+}
+_OFFSETS = {"est": -5, "edt": -4, "cst": -6, "cdt": -5, "mst": -7,
+            "mdt": -6, "pst": -8, "pdt": -7, "utc": 0, "gmt": 0}
+BLOCKED_PLACEHOLDER = re.compile(r"^\S+\.\S+ is blocked$")
+TITLE_SEPARATORS = (" | ", " - ", " — ", " – ")
+
+
+def snapshot_taken(html: str) -> datetime | None:
+    """When archive.today captured the page, from its canonical link."""
+    soup = BeautifulSoup(html, "lxml")
+    canonical = soup.find("link", rel="canonical")
+    match = SNAPSHOT_CANONICAL.match(str(canonical.get("href") or "")) \
+        if canonical else None
+    if not match:
+        return None
+    return datetime.strptime(match.group("stamp"), "%Y.%m.%d-%H%M%S") \
+        .replace(tzinfo=timezone.utc)
+
+
+def _archived_page(html: str) -> Tag:
+    """The archived page itself, without archive.today's own header."""
+    soup = BeautifulSoup(html, "lxml")
+    header = soup.find(id="HEADER")
+    if header is not None:
+        header.decompose()
+    for tag in soup.find_all(["script", "style", "noscript"]):
+        tag.decompose()
+    return soup.find(id="CONTENT") or soup.body or soup
+
+
+def _clean(text: str) -> str:
+    return " ".join(text.split())
+
+
+def strip_site_suffix(title: str, url: str) -> str:
+    """'War Bros ... | WIRED' -> 'War Bros ...', when the tail is the site.
+
+    The tail counts as the site when it spells the domain: WIRED is
+    wired.com, The Washington Post is washingtonpost.com, and The New York
+    Times is nytimes.com by its initials.
+    """
+    label = domain_of(url).split(".")[0]
+    for separator in TITLE_SEPARATORS:
+        head, found, tail = title.rpartition(separator)
+        if not found or not head.strip() or len(tail.split()) > 6:
+            continue
+        words = [w for w in re.split(r"[^a-z0-9]+", tail.lower()) if w]
+        if words and words[0] == "the":
+            words = words[1:]
+        if not words:
+            continue
+        spellings = {"".join(words),
+                     "".join(w[0] for w in words[:-1]) + words[-1]}
+        if label in spellings:
+            return head.strip()
+    return title
+
+
+def _complete_title(title: str | None, page: Tag, full_title: str | None
+                    ) -> str | None:
+    """Finish a title archive.today cut short with an ellipsis.
+
+    The page's own <title> survives whole, as does the headline; whichever
+    begins with the shortened text is the rest of it.
+    """
+    if not title or not title.rstrip().endswith(("…", "...")):
+        return title
+    prefix = _clean(title.rstrip().rstrip(".…")).lower()
+    candidates = [full_title or ""] + [
+        _clean(h.get_text(" ", strip=True)) for h in page.find_all("h1")]
+    for candidate in candidates:
+        if BLOCKED_PLACEHOLDER.match(candidate):
+            continue
+        if candidate.lower().startswith(prefix) and len(candidate) > len(prefix):
+            return candidate
+    return title
+
+
+def _parse_dateline(match: re.Match[str]) -> datetime | date | None:
+    try:
+        day = date(int(match.group("year")),
+                   _MONTHS[match.group("month").lower().rstrip(".")],
+                   int(match.group("day")))
+    except (KeyError, ValueError):
+        return None
+    if not match.group("hour"):
+        return day
+    hour, minute = int(match.group("hour")), int(match.group("minute"))
+    ampm = (match.group("ampm") or "").lower().replace(".", "").strip()
+    if ampm.startswith("p") and hour < 12:
+        hour += 12
+    if ampm.startswith("a") and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return day
+    moment = datetime(day.year, day.month, day.day, hour, minute)
+    zone = (match.group("tz") or "").lower()
+    if zone in _ZONES:
+        return moment.replace(tzinfo=ZoneInfo(_ZONES[zone]))
+    if zone in _OFFSETS:
+        return moment.replace(tzinfo=timezone(timedelta(hours=_OFFSETS[zone])))
+    return moment
+
+
+def _dates_in(text: str) -> list[datetime | date]:
+    found: list[tuple[int, datetime | date]] = []
+    for pattern in DATELINES:
+        for match in pattern.finditer(text):
+            parsed = _parse_dateline(match)
+            if parsed is not None:
+                found.append((match.start(), parsed))
+    for match in NUMERIC_DATE.finditer(text):
+        first, second, year = (int(g) for g in match.groups())
+        for month, day in ((first, second), (second, first)):
+            try:
+                found.append((match.start(), date(year, month, day)))
+            except ValueError:
+                continue
+    return [value for _, value in sorted(found, key=lambda pair: pair[0])]
+
+
+def _page_dates(page: Tag) -> list[datetime | date]:
+    """Every date the archived page states, in reading order."""
+    dates: list[datetime | date] = []
+    for node in page.descendants:
+        if isinstance(node, Tag) and node.name == "time":
+            stamp = str(node.get("datetime") or "").strip()
+            try:
+                dates.append(datetime.fromisoformat(stamp.replace("Z",
+                                                                  "+00:00")))
+                continue
+            except ValueError:
+                pass
+            dates.extend(_dates_in(node.get_text(" ", strip=True)))
+        elif isinstance(node, NavigableString) and node.find_parent("time") \
+                is None:
+            dates.extend(_dates_in(str(node)))
+    return dates
+
+
+def _day(value: datetime | date) -> date:
+    return value.date() if isinstance(value, datetime) else value
+
+
+def impute_published(page: Tag, url: str, taken: datetime | None
+                     ) -> str | None:
+    """The publication date stated on an archived page.
+
+    The first date on the page that could be the publication wins: not
+    after the capture, and, when the URL carries a date as news URLs do,
+    within a few days of it. That passes over embedded posts quoted in the
+    piece and the "today" lists in a sidebar. Failing all that, the URL's
+    own date is better than nothing; the capture time is not used, since a
+    page saved years later would claim to be new.
+    """
+    url_match = URL_DATE.search(urlparse(url).path + "/")
+    url_day: date | None = None
+    url_month: tuple[int, int] | None = None
+    if url_match:
+        year, month, day = url_match.groups()
+        try:
+            url_month = (int(year), int(month))
+            url_day = date(int(year), int(month), int(day)) if day else None
+        except ValueError:
+            url_month = url_day = None
+    latest = _day(taken) + timedelta(days=1) if taken else None
+
+    dates = _page_dates(page)
+    for index, value in enumerate(dates):
+        day = _day(value)
+        if latest and day > latest:
+            continue
+        if url_day and not (url_day - timedelta(days=2) <= day
+                            <= url_day + timedelta(days=3)):
+            continue
+        if url_month and not url_day and (day.year, day.month) != url_month:
+            continue
+        if not isinstance(value, datetime):
+            # A dateline often says the day and, a line later, the minute
+            # ("Sept. 5, 2026" over a timestamped <time>). Take the minute.
+            value = next((later for later in dates[index + 1:index + 4]
+                          if isinstance(later, datetime)
+                          and later.date() == day), value)
+        if isinstance(value, datetime):
+            return value.isoformat(timespec="seconds")
+        return value.isoformat()
+    return url_day.isoformat() if url_day else None
+
+
+def snapshot_title_and_date(html: str, title: str | None, url: str
+                            ) -> tuple[str | None, str | None]:
+    """The title and publication date of an archive.today snapshot."""
+    soup = BeautifulSoup(html, "lxml")
+    full_title = _clean(soup.title.get_text(" ", strip=True)) \
+        if soup.title else None
+    page = _archived_page(html)
+    title = _complete_title(title or full_title, page, full_title)
+    if title:
+        title = strip_site_suffix(title, url)
+    return title, impute_published(page, url, snapshot_taken(html))
 
 
 # --------------------------------------------------------------------------

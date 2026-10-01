@@ -95,6 +95,15 @@ been archived, and adding the publisher's URL afterwards finds the same
 article rather than a second copy. When the server itself falls back to
 archive.today, the snapshot it used is recorded the same way.
 
+archive.today also rewrites the page's title and date tags: titles are cut at
+70 characters and every date is set to the moment of capture. For snapshots
+those tags are ignored. The title is completed from the page's own `<title>`
+or headline and loses a trailing site name such as "| WIRED". The publication
+date is the first date on the archived page that falls before the capture
+and, for news URLs carrying a date, within a few days of it. That skips
+embedded posts and sidebar lists. With no such date, the URL's date is used,
+and failing that the date is left blank rather than showing the capture time.
+
 Captured articles show as `via your browser`. Capturing a page while the bot
 check is still on screen is rejected rather than filed as the article, so wait
 for the piece to load before clicking.
