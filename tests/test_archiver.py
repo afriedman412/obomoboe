@@ -225,8 +225,7 @@ class TestTagModes:
         article_id = make_article(conn, url=f"https://example.com/{mode}")
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None:
-                extract_mod.Fetched(FULL_PAGE, 200, url, {}))
+            _serving(FULL_PAGE))
         archiver.archive_article(config, article_id)
         row = db.get_article(conn, article_id)
         return (db.tags_for_articles(conn, [article_id]).get(article_id, []),
@@ -253,9 +252,118 @@ class TestTagModes:
         article_id = make_article(conn, url="https://example.com/default")
         monkeypatch.setattr(
             archiver, "fetch",
-            lambda url, ua, timeout, session=None:
-                extract_mod.Fetched(FULL_PAGE, 200, url, {}))
+            _serving(FULL_PAGE))
         archiver.archive_article(config, article_id)
         row = db.get_article(conn, article_id)
         assert db.get_suggestions(row)
         assert db.tags_for_articles(conn, [article_id]).get(article_id, []) == []
+
+
+# A trimmed archive.today snapshot: the canonical link names the original,
+# og:url is the short link, and the site calls itself archive.ph.
+WAPO = ("https://www.washingtonpost.com/technology/2022/11/22/"
+        "dril-musk-twitter-future")
+
+SNAPSHOT_PAGE = """
+<html><head>
+<link rel="canonical" href="https://archive.ph/2022.11.23-130517/%(wapo)s/">
+<meta property="og:url" content="https://archive.ph/AgqSY">
+<meta property="og:site_name" content="archive.ph">
+<meta property="og:title" content="Dril speaks">
+</head><body>
+<div id="HEADER"><form><input name="q" value="%(wapo)s/"></form></div>
+<article>%(body)s</article></body></html>
+""" % {"wapo": WAPO, "body": "".join(
+    f"<p>Snapshot sentence {i} carrying a decent number of ordinary "
+    f"words so the extractor treats this as an article.</p>"
+    for i in range(30))}
+
+
+def _serving(page):
+    def fake_fetch(url, ua, timeout, session=None):
+        return extract_mod.Fetched(page, 200, url, {})
+    return fake_fetch
+
+
+class TestArchiveTodaySnapshots:
+    """Saving from archive.today used to file the article under archive.ph:
+    the list said "archive.ph" and the only link went to the snapshot."""
+
+    def test_snapshot_added_by_link_learns_the_original(
+            self, config, conn, monkeypatch):
+        article_id = make_article(conn, url="https://archive.ph/AgqSY")
+        fetched = []
+
+        def fake_fetch(url, ua, timeout, session=None):
+            fetched.append(url)
+            return extract_mod.Fetched(SNAPSHOT_PAGE, 200, url, {})
+
+        monkeypatch.setattr(archiver, "fetch", fake_fetch)
+        archiver.archive_article(config, article_id)
+
+        row = db.get_article(conn, article_id)
+        assert fetched == ["https://archive.ph/AgqSY"]
+        assert row["original_url"] == WAPO
+        assert row["archive_url"] == "https://archive.ph/AgqSY"
+        assert row["site_name"] == "washingtonpost.com"
+        # The key stays the link that was saved, so re-archiving reads the
+        # same snapshot rather than the paywalled original.
+        assert row["url"] == "https://archive.ph/AgqSY"
+
+    def test_adding_the_original_later_finds_the_snapshot(self, config, conn,
+                                                          monkeypatch):
+        article_id = make_article(conn, url="https://archive.ph/AgqSY")
+        monkeypatch.setattr(
+            archiver, "fetch",
+            _serving(SNAPSHOT_PAGE))
+        archiver.archive_article(config, article_id)
+        assert db.find_by_url(conn, WAPO)["id"] == article_id
+
+    def test_urls_are_learned_even_when_the_text_is_kept(self, config, conn,
+                                                         monkeypatch):
+        """A re-archive that comes back shorter keeps the earlier text; it
+        must still record where the piece lives."""
+        article_id = make_article(conn, url="https://archive.ph/AgqSY")
+        db.update_article(conn, article_id, archive_status=db.OK,
+                          word_count=99999)
+        monkeypatch.setattr(
+            archiver, "fetch",
+            _serving(SNAPSHOT_PAGE))
+        result = archiver.archive_article(config, article_id)
+        assert result.get("kept") is True
+        row = db.get_article(conn, article_id)
+        assert row["original_url"] == WAPO
+        assert row["archive_url"] == "https://archive.ph/AgqSY"
+
+    def test_fallback_to_archive_today_records_the_snapshot(self, config, conn,
+                                                            monkeypatch):
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        article_id = make_article(conn, url=WAPO)
+        monkeypatch.setattr(
+            archiver, "fetch",
+            _serving(PAYWALL_STUB))
+        asked = []
+
+        def fake_archive(url, ua, hosts, timeout, session=None):
+            asked.append(url)
+            return SNAPSHOT_PAGE, 200, "https://archive.ph/AgqSY"
+
+        monkeypatch.setattr(archiver, "fetch_from_archive_ph", fake_archive)
+        archiver.archive_article(config, article_id)
+
+        row = db.get_article(conn, article_id)
+        assert asked == [WAPO]
+        assert row["archive_source"] == "archive.today"
+        assert row["original_url"] == WAPO
+        assert row["archive_url"] == "https://archive.ph/AgqSY"
+
+    def test_ordinary_pages_are_left_alone(self, config, conn, monkeypatch):
+        article_id = make_article(conn)
+        monkeypatch.setattr(
+            archiver, "fetch",
+            _serving(FULL_PAGE))
+        archiver.archive_article(config, article_id)
+        row = db.get_article(conn, article_id)
+        assert row["original_url"] == "https://example.com/post"
+        assert row["archive_url"] is None
+        assert row["site_name"] == "Example"

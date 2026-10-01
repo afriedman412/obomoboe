@@ -249,6 +249,42 @@ class TestCapture:
         assert "obomoboe-capture" in page
         assert "fetch('/capture'" in page
 
+    def test_capture_from_a_snapshot_files_under_the_original(
+            self, client, app, conn):
+        """The bookmarklet clicked on an archive.ph page used to save the
+        article as archive.ph; the publisher's URL was lost."""
+        page = self.PAGE.replace(
+            "<head>",
+            "<head><link rel='canonical' href='https://archive.ph/"
+            "2026.09.05-204116/https://www.nytimes.com/2026/09/05/arts/"
+            "latimore.html'><meta property='og:url' "
+            "content='https://archive.ph/2Chks'>")
+        resp = client.post("/capture", json={
+            "url": "https://archive.ph/2Chks", "html": page})
+        article_id = resp.get_json()["id"]
+        row = db.get_article(conn, article_id)
+        original = "https://www.nytimes.com/2026/09/05/arts/latimore.html"
+        assert row["url"] == original
+        assert row["original_url"] == original
+        assert row["archive_url"] == "https://archive.ph/2Chks"
+
+        archiver.archive_article(dict(app.config), article_id,
+                                 from_capture=True)
+        body = client.get(f"/a/{article_id}").get_data(as_text=True)
+        assert f'href="{original}"' in body
+        assert 'href="https://archive.ph/2Chks"' in body
+
+    def test_capturing_a_snapshot_of_a_saved_article_refiles_it(self, client,
+                                                                conn):
+        first = self._capture(client, url="https://walled.example/piece")
+        page = self.PAGE.replace(
+            "<head>",
+            "<head><link rel='canonical' href='https://archive.ph/"
+            "2026.01.01-000000/https://walled.example/piece'>")
+        second = client.post("/capture", json={
+            "url": "https://archive.ph/Xyz12", "html": page})
+        assert second.get_json()["id"] == first.get_json()["id"]
+
     def test_captured_bot_check_is_refused_not_filed(self, client, app, conn):
         """Capturing exists to get past a challenge; a captured challenge is
         a failed capture, not an article."""

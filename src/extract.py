@@ -26,6 +26,17 @@ TRACKING_PARAMS = re.compile(
 
 HOSTNAME = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
 
+# archive.today answers on all of these; a snapshot link can use any of them.
+ARCHIVE_TODAY_HOSTS = {
+    "archive.ph", "archive.today", "archive.is", "archive.li", "archive.vn",
+    "archive.md", "archive.fo",
+}
+
+# A snapshot's canonical link: https://archive.ph/2022.11.23-130517/<original>
+SNAPSHOT_CANONICAL = re.compile(
+    r"^https?://(?:www\.)?(?P<host>[a-z.]+)/\d{4}\.\d{2}\.\d{2}-\d{6}/"
+    r"(?P<original>https?://.+)$", re.IGNORECASE)
+
 PAYWALL_MARKERS = (
     "subscribe to continue",
     "subscribe to keep reading",
@@ -103,6 +114,11 @@ class Extracted:
     source: str = "direct"
     images: list[str] = field(default_factory=list)
     headers: dict[str, str] = field(default_factory=dict)
+    # Set when the page is an archive.today snapshot: the publisher's own
+    # URL, and the snapshot's short link. `url` stays the address the page
+    # was read from, since the snapshot's images resolve against it.
+    original_url: str | None = None
+    archive_url: str | None = None
 
     @property
     def word_count(self) -> int:
@@ -111,6 +127,8 @@ class Extracted:
     def metadata(self) -> dict[str, Any]:
         return {
             "url": self.url,
+            "original_url": self.original_url,
+            "archive_url": self.archive_url,
             "title": self.title,
             "author": self.author,
             "site_name": self.site_name,
@@ -169,6 +187,55 @@ def normalize_url(raw: str) -> str:
 def domain_of(url: str) -> str:
     host = urlparse(url).netloc.lower()
     return host[4:] if host.startswith("www.") else host
+
+
+def is_archive_today(url: str | None) -> bool:
+    return bool(url) and domain_of(str(url)) in ARCHIVE_TODAY_HOSTS
+
+
+def snapshot_urls(html: str, page_url: str = ""
+                  ) -> tuple[str, str] | None:
+    """(original URL, snapshot link) if this page is an archive.today snapshot.
+
+    Saving from a snapshot used to file the article under archive.ph, so the
+    list said "archive.ph" and the link back went to the snapshot. The page
+    states what it is a copy of in two places: the canonical link,
+    archive.ph/<timestamp>/<original>, and the search box in its header. The
+    original is the one followed through redirects, so a snapshot of a t.co
+    link still yields the article.
+    """
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "lxml")
+    original: str | None = None
+
+    canonical = soup.find("link", rel="canonical")
+    match = SNAPSHOT_CANONICAL.match(str(canonical.get("href") or "")) \
+        if canonical else None
+    if match and match.group("host").lower() in ARCHIVE_TODAY_HOSTS:
+        original = match.group("original")
+    elif is_archive_today(page_url):
+        box = soup.find("input", attrs={"name": "q"})
+        if box is not None and box.get("value"):
+            original = str(box["value"])
+    if not original:
+        return None
+
+    try:
+        original = normalize_url(original)
+    except ValueError:
+        return None
+    if is_archive_today(original):
+        return None
+
+    short = _meta_content(soup, "og:url")
+    if is_archive_today(short):
+        snapshot = str(short)
+    elif is_archive_today(page_url):
+        snapshot = page_url
+    else:
+        snapshot = str(canonical.get("href")) if canonical else page_url
+    return original, snapshot
 
 
 # --------------------------------------------------------------------------
@@ -318,6 +385,16 @@ def extract(html: str, url: str, status_code: int = 200,
         result.excerpt = meta.description or None
         result.published_at = meta.date or None
 
+    snapshot = snapshot_urls(html, url)
+    if snapshot is not None:
+        result.original_url, result.archive_url = snapshot
+        # archive.today names itself as the site; that is the shelf, not
+        # the publisher.
+        if result.site_name and (is_archive_today("https://" + result.site_name)
+                                 or result.site_name.lower() in
+                                 ARCHIVE_TODAY_HOSTS):
+            result.site_name = None
+
     if not result.title:
         og_title = _meta_content(soup, "og:title", "twitter:title")
         if og_title:
@@ -329,7 +406,10 @@ def extract(html: str, url: str, status_code: int = 200,
     if not result.excerpt:
         result.excerpt = _meta_content(soup, "og:description", "description")
     if not result.site_name:
-        result.site_name = _meta_content(soup, "og:site_name") or domain_of(url)
+        site = _meta_content(soup, "og:site_name")
+        if snapshot is not None or not site:
+            site = domain_of(result.original_url or url)
+        result.site_name = site
     exact = precise_published_at(soup)
     if exact and (not result.published_at
                   or exact[:10] == str(result.published_at)[:10]):

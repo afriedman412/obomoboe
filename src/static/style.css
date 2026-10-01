@@ -607,6 +607,9 @@ button.chip { cursor: pointer; font-family: var(--stencil); }
 }
 .source a { color: var(--moss-deep); }
 .source a:hover { color: var(--umber); }
+/* Secondary to the publisher's link above it. */
+.source--archive { margin-top: 2px; }
+.source--archive a { color: var(--muted); }
 
 /* Your history with the article, not the article's own facts. */
 .logged {

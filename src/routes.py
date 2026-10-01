@@ -12,7 +12,7 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
 from markupsafe import Markup
 
 from . import archiver, db, tagging
-from .extract import archive_ph_submit_url, normalize_url
+from .extract import archive_ph_submit_url, normalize_url, snapshot_urls
 
 bp = Blueprint("main", __name__)
 
@@ -159,6 +159,14 @@ def capture():
     if not html.strip():
         return _cors(jsonify({"error": "no page content sent"})), 400
 
+    # Saving from an archive.today snapshot files the article under the
+    # publisher's URL, so it lists as theirs and meets any copy already
+    # saved from the live site. The snapshot link is kept alongside.
+    snapshot = snapshot_urls(html, url)
+    archive_url = None
+    if snapshot is not None:
+        url, archive_url = snapshot
+
     conn = db.get_db()
     existing = db.find_by_url(conn, url)
     if existing is not None:
@@ -171,6 +179,9 @@ def capture():
             if row is None:
                 return _cors(jsonify({"error": "could not save"})), 500
             article_id = int(row["id"])
+
+    if archive_url:
+        db.update_article(conn, article_id, archive_url=archive_url)
 
     # Tag whether or not the row is new -- re-capturing a page you are
     # refiling should still accept the tags you sent with it.

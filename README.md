@@ -86,6 +86,15 @@ have been blocked" — but it renders fine in the browser you're logged into.
 The same applies to anything you subscribe to: the copy that gets archived is
 the copy you can see.
 
+Saving from an archive.today snapshot (archive.ph, archive.is and the other
+mirrors) files the article under the publisher's own URL, read from the
+snapshot's canonical link. The list shows the publisher's site, the article
+page links to the original as "from", and the snapshot is kept beside it as
+"archive". A snapshot link pasted into the box works the same way once it has
+been archived, and adding the publisher's URL afterwards finds the same
+article rather than a second copy. When the server itself falls back to
+archive.today, the snapshot it used is recorded the same way.
+
 Captured articles show as `via your browser`. Capturing a page while the bot
 check is still on screen is rejected rather than filed as the article, so wait
 for the piece to load before clicking.

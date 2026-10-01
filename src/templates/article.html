@@ -26,6 +26,15 @@
     <a href="{{ article.original_url }}" target="_blank"
        rel="noreferrer noopener">{{ article.original_url }}</a>
   </p>
+  {% if article.archive_url %}
+    {# The copy was read from archive.today. The publisher's URL above is
+       the article's address; this is where the text came from. #}
+    <p class="source source--archive">
+      <span>archive</span>
+      <a href="{{ article.archive_url }}" target="_blank"
+         rel="noreferrer noopener">{{ article.archive_url }}</a>
+    </p>
+  {% endif %}
 
   {# When it entered the list and when you finished it -- your history with
      the piece, kept apart from the byline, which describes the piece. #}

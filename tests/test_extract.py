@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup
 
 from src.extract import (Extracted, drop_leading_title, extract,
                          is_challenge_page, looks_paywalled, normalize_url,
-                         sanitize_fragment, strip_chrome)
+                         sanitize_fragment, snapshot_urls, strip_chrome)
 
 ARTICLE_HTML = """
 <html><head>
@@ -397,3 +397,39 @@ class TestChromeStripping:
         assert drop_leading_title(fragment, "The Piece") == fragment
         assert "<h2>" not in drop_leading_title(
             "<h2>The Piece</h2><p>text</p>", "The Piece")
+
+
+class TestSnapshotUrls:
+    CANONICAL = ("<link rel='canonical' href='https://archive.ph/"
+                 "2024.05.31-135535/https://www.stltoday.com/news/a.html'>")
+
+    def test_canonical_link_names_the_original(self):
+        page = (f"<html><head>{self.CANONICAL}<meta property='og:url' "
+                f"content='https://archive.ph/TazWD'></head></html>")
+        assert snapshot_urls(page, "https://archive.ph/TazWD") == (
+            "https://www.stltoday.com/news/a.html", "https://archive.ph/TazWD")
+
+    def test_search_box_is_the_fallback_on_an_archive_page(self):
+        page = ("<html><body><input name='q' "
+                "value='https://jacobin.com/2022/12/piece'></body></html>")
+        assert snapshot_urls(page, "https://archive.is/OtQbq") == (
+            "https://jacobin.com/2022/12/piece", "https://archive.is/OtQbq")
+
+    def test_a_search_box_elsewhere_means_nothing(self):
+        page = ("<html><body><input name='q' "
+                "value='https://jacobin.com/x'></body></html>")
+        assert snapshot_urls(page, "https://example.com/search") is None
+
+    def test_ordinary_canonical_is_not_a_snapshot(self):
+        page = ("<html><head><link rel='canonical' "
+                "href='https://example.com/2024.05.31-135535/x'></head></html>")
+        assert snapshot_urls(page, "https://example.com/p") is None
+
+    def test_site_name_is_the_publisher_not_the_archive(self):
+        page = ("<html><head>" + self.CANONICAL +
+                "<meta property='og:site_name' content='archive.ph'></head>"
+                "<body><article>" + "<p>ordinary article words here</p>" * 30
+                + "</article></body></html>")
+        result = extract(page, "https://archive.ph/TazWD")
+        assert result.site_name == "stltoday.com"
+        assert result.original_url == "https://www.stltoday.com/news/a.html"

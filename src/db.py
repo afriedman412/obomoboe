@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS articles (
     archive_error   TEXT,
     archived_at     TEXT,
     notes           TEXT NOT NULL DEFAULT '',
-    suggested_tags  TEXT NOT NULL DEFAULT ''
+    suggested_tags  TEXT NOT NULL DEFAULT '',
+    archive_url     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_articles_added ON articles(added_at DESC);
@@ -87,6 +88,8 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
 # add them to a database that already exists, so do it by hand.
 ADDED_COLUMNS = (
     ("articles", "suggested_tags", "TEXT NOT NULL DEFAULT ''"),
+    # The archive.today snapshot an article was read from, when it was.
+    ("articles", "archive_url", "TEXT"),
 )
 
 
@@ -144,7 +147,15 @@ def get_article(conn: sqlite3.Connection, article_id: int) -> sqlite3.Row | None
 
 
 def find_by_url(conn: sqlite3.Connection, url: str) -> sqlite3.Row | None:
-    return conn.execute("SELECT * FROM articles WHERE url = ?", (url,)).fetchone()
+    """The article saved under this URL, or whose original this URL is.
+
+    An article added as an archive.today link keeps that link as its key but
+    learns the publisher's URL once archived; adding the publisher's URL
+    afterwards is the same article, not a new one.
+    """
+    return conn.execute(
+        "SELECT * FROM articles WHERE url = ? OR original_url = ? "
+        "ORDER BY url = ? DESC, id LIMIT 1", (url, url, url)).fetchone()
 
 
 def update_article(conn: sqlite3.Connection, article_id: int, **fields: Any) -> None:

@@ -67,12 +67,17 @@ def archive_article(config: dict[str, Any], article_id: int,
         if row is None:
             return {"ok": False, "error": "article no longer exists"}
 
-        url = row["original_url"]
+        # `url` is what was saved -- an archive.today link stays one, so a
+        # re-archive reads the same snapshot. `original_url` is the
+        # publisher's, which is what archive.today has to be asked about.
+        url = row["url"]
+        original = row["original_url"] or url
         db.update_article(conn, article_id, archive_status=db.PENDING,
                           archive_error=None)
 
         result, note = _retrieve(config, url, force_archive_ph,
-                                 article_id if from_capture else None)
+                                 article_id if from_capture else None,
+                                 lookup_url=original)
         if result is None:
             db.update_article(conn, article_id, archive_status=db.FAILED,
                               archive_error=note, archived_at=db.utcnow())
@@ -86,8 +91,11 @@ def archive_article(config: dict[str, Any], article_id: int,
                 and result.word_count < existing_words):
             kept = _note(note, f"kept the earlier copy ({existing_words} "
                                f"words); this attempt got {result.word_count}")
+            # Where the piece lives is a fact about the source, not the
+            # extraction, so learn it even when the text is not replaced.
             db.update_article(conn, article_id, archive_status=db.OK,
-                              archive_error=kept, archived_at=db.utcnow())
+                              archive_error=kept, archived_at=db.utcnow(),
+                              **_source_urls(row, result))
             return {"ok": True, "source": row["archive_source"],
                     "word_count": existing_words, "note": kept, "kept": True}
 
@@ -106,6 +114,7 @@ def archive_article(config: dict[str, Any], article_id: int,
             archive_source=result.source,
             archive_error=note,
             archived_at=db.utcnow(),
+            **_source_urls(row, result),
         )
         db.index_article(conn, article_id, result.title or url, result.text)
         _apply_tags(config, conn, article_id, result)
@@ -118,6 +127,20 @@ def archive_article(config: dict[str, Any], article_id: int,
         return {"ok": False, "error": str(exc)}
     finally:
         conn.close()
+
+
+def _source_urls(row: Any, result: Extracted) -> dict[str, str]:
+    """The publisher's URL and the snapshot link, when the copy was one.
+
+    Only ever adds what was learned: a later direct fetch does not forget
+    the snapshot an article was first read from.
+    """
+    fields: dict[str, str] = {}
+    if result.original_url and result.original_url != row["original_url"]:
+        fields["original_url"] = result.original_url
+    if result.archive_url and result.archive_url != row["archive_url"]:
+        fields["archive_url"] = result.archive_url
+    return fields
 
 
 def _apply_tags(config: dict[str, Any], conn: Any, article_id: int,
@@ -166,9 +189,14 @@ def _note(*parts: str | None) -> str | None:
 
 
 def _retrieve(config: dict[str, Any], url: str, force_archive_ph: bool,
-              capture_id: int | None = None
+              capture_id: int | None = None, lookup_url: str | None = None
               ) -> tuple[Extracted | None, str | None]:
-    """Try the live page, fall back to archive.today when it looks paywalled."""
+    """Try the live page, fall back to archive.today when it looks paywalled.
+
+    `lookup_url` is what archive.today is asked about; it differs from `url`
+    when the saved link is itself a snapshot.
+    """
+    lookup_url = lookup_url or url
     # A page handed to us by the browser needs no fetching at all -- it was
     # rendered in a session that is already logged in and already past
     # whatever bot check stands between us and the article.
@@ -217,10 +245,12 @@ def _retrieve(config: dict[str, Any], url: str, force_archive_ph: bool,
 
     try:
         html, status, final_url = fetch_from_archive_ph(
-            url, user_agent, config["ARCHIVE_PH_HOSTS"], timeout, session
+            lookup_url, user_agent, config["ARCHIVE_PH_HOSTS"], timeout, session
         )
-        archived = extract(html, url, status, source="archive.today")
-        archived.url = url
+        archived = extract(html, lookup_url, status, source="archive.today")
+        archived.url = lookup_url
+        archived.original_url = archived.original_url or lookup_url
+        archived.archive_url = archived.archive_url or final_url
         # Only prefer the snapshot if it actually gave us more to read.
         if direct is None or archived.word_count > direct.word_count:
             note = f"used archive.today ({direct_error})" if direct_error else None
