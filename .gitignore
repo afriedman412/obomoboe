@@ -85,3 +85,10 @@ docs/build/*
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Signing material -- never commit; CI gets it from repository secrets
+*.p12
+*.pfx
+*.p8
+*.cer
+*.certSigningRequest
