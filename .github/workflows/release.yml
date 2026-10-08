@@ -1,6 +1,19 @@
 # Builds the double-clickable app for each platform. Push a tag like v1.0.0
 # to publish a GitHub release with the downloads attached; run it by hand
 # from the Actions tab to just get the builds as workflow artifacts.
+#
+# The Mac app is signed with a Developer ID and notarized by Apple, so it
+# opens without a Gatekeeper warning. That needs these repository secrets:
+#
+#   MACOS_CERTIFICATE_P12       Developer ID Application certificate and its
+#                               private key, exported as .p12, base64-encoded
+#   MACOS_CERTIFICATE_PASSWORD  the password the .p12 was exported with
+#   APPLE_ID                    the Apple ID email of the developer account
+#   APPLE_APP_PASSWORD          an app-specific password for that Apple ID
+#   APPLE_TEAM_ID               the 10-character team ID
+#
+# A tag build fails without them rather than releasing an app that macOS
+# will refuse to open; a manual run without them builds unsigned.
 name: release
 
 on:
@@ -21,6 +34,8 @@ jobs:
           - os: windows-latest
             name: obomoboe-windows
     runs-on: ${{ matrix.os }}
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -36,6 +51,39 @@ jobs:
       - name: Test
         run: python -m pytest tests/ -q
 
+      - name: Require signing for releases (macOS)
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v') && env.MACOS_CERTIFICATE_P12 == ''
+        run: |
+          echo "::error::MACOS_CERTIFICATE_P12 is not set; see the top of release.yml"
+          exit 1
+
+      # A throwaway keychain holding only the certificate, unlocked for
+      # codesign, so the build can sign without a password prompt.
+      - name: Import signing certificate (macOS)
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != ''
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          if [ -z "$identity" ]; then
+            echo "::error::no Developer ID Application identity in the certificate"
+            exit 1
+          fi
+          echo "OBOMOBOE_CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
       - name: Build
         run: pyinstaller --noconfirm --clean obomoboe.spec
 
@@ -46,6 +94,31 @@ jobs:
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         run: python scripts/smoke_test.py dist/obomoboe/obomoboe.exe
+
+      # Apple checks the upload and records it; stapling attaches that
+      # record to the app so Gatekeeper can accept it offline too.
+      - name: Notarize (macOS)
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent dist/obomoboe.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --wait \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --output-format json > "$RUNNER_TEMP/notary.json" \
+            || true
+          cat "$RUNNER_TEMP/notary.json"
+          if ! grep -q '"status" *: *"Accepted"' "$RUNNER_TEMP/notary.json"; then
+            id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$RUNNER_TEMP/notary.json" || true)"
+            [ -n "$id" ] && xcrun notarytool log "$id" --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"
+            echo "::error::notarization was not accepted"
+            exit 1
+          fi
+          xcrun stapler staple dist/obomoboe.app
+          spctl --assess --type execute --verbose dist/obomoboe.app
 
       # ditto rather than zip: it keeps the symlinks inside the app bundle,
       # which macOS needs for the bundle to open.

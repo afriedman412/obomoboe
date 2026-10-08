@@ -12,11 +12,8 @@ unzip it. Nothing else to install — Python and everything it needs are inside.
 
 - **Mac** (`obomoboe-mac-apple-silicon.zip` for M-series Macs,
   `obomoboe-mac-intel.zip` for older ones): drag `obomoboe.app` into
-  Applications and open it. The first time, macOS says it can't check the app
-  for malicious software, because it isn't signed with an Apple developer
-  certificate. Open **System Settings → Privacy & Security**, scroll down to
-  the message about obomoboe and click **Open Anyway**. After that it opens
-  normally.
+  Applications and open it. It is signed and notarized by Apple, so it opens
+  like any other downloaded app.
 - **Windows** (`obomoboe-windows.zip`): put the `obomoboe` folder somewhere
   that suits you and open `obomoboe.exe` inside it. If SmartScreen says
   "Windows protected your PC", click **More info → Run anyway**.
@@ -50,8 +47,9 @@ packaged app does, with a background server and a quit button, but keeps
 using `data/`.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and
-builds the app for Apple Silicon Macs, Intel Macs and Windows and attaches
-the zips to a GitHub release.
+builds the app for Apple Silicon Macs, Intel Macs and Windows, signs and
+notarizes the Mac builds, and attaches the zips to a GitHub release. The
+signing secrets it needs are listed at the top of that file.
 
 There is no login. It binds to `127.0.0.1` and is meant to stay there — the
 archive viewer renders HTML from arbitrary websites, so don't expose it to a
