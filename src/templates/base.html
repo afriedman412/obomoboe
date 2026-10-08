@@ -13,6 +13,11 @@
     <nav>
       <a href="{{ url_for('main.bookmarklet') }}">bookmarklet</a>
       <a href="{{ url_for('main.settings') }}">settings</a>
+      {% if can_quit %}
+        <form method="post" action="{{ url_for('main.quit_app') }}">
+          <button type="submit" title="Stop obomoboe. Open the app again to restart it.">quit</button>
+        </form>
+      {% endif %}
     </nav>
   </header>
 

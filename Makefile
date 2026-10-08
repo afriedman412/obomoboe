@@ -15,6 +15,14 @@ else
 	. $(VENV_PATH); pip install -r requirements.txt
 endif
 
+.PHONY: app
+
+# The double-clickable app: dist/obomoboe.app on macOS, dist/obomoboe/ on
+# Windows. Releases are built by .github/workflows/release.yml.
+app: install
+	. $(VENV_PATH); pip install --upgrade pyinstaller
+	${PYTHON} -m PyInstaller --noconfirm --clean obomoboe.spec
+
 .PHONY: test
 
 test:

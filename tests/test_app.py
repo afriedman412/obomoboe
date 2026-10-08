@@ -321,6 +321,9 @@ class TestTimestampDisplay:
         fmt = app.jinja_env.filters["humantime"]
         with app.app_context():
             assert "at" in fmt("2026-09-24T22:49:25+00:00")
+            # No leading zeros, spelled without %-d so it works on Windows.
+            assert fmt("2026-09-04T09:05:00") == "Sep 4, 2026 at 9:05 AM"
+            assert fmt("2026-09-04T00:30:00") == "Sep 4, 2026 at 12:30 AM"
             # A bare date has no time to show, so it reads as a date.
             assert fmt("2026-09-24") == "Sep 24, 2026"
             assert fmt(None) == ""
@@ -653,3 +656,34 @@ class TestReadingDates:
         assert db.get_article(conn, article_id)["read_at"] is None
         soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
         assert soup.select_one(".logged__read") is None
+
+
+class TestDesktopApp:
+    def test_ping_names_the_app(self, client):
+        assert client.get("/ping").get_json() == {"app": "obomoboe"}
+
+    def test_no_quit_unless_the_launcher_runs_the_server(self, client):
+        assert client.post("/quit").status_code == 404
+        assert 'action="/quit"' not in client.get("/").get_data(as_text=True)
+
+    def test_quit_calls_the_launchers_shutdown(self, app, client):
+        calls = []
+        app.extensions["obomoboe.shutdown"] = lambda: calls.append(1)
+        assert 'action="/quit"' in client.get("/").get_data(as_text=True)
+        resp = client.post("/quit", headers={"Origin": "http://localhost"})
+        assert resp.status_code == 200
+        assert "has stopped" in resp.get_data(as_text=True)
+        assert calls == [1]
+
+    def test_another_site_cannot_quit_it(self, app, client):
+        calls = []
+        app.extensions["obomoboe.shutdown"] = lambda: calls.append(1)
+        resp = client.post("/quit", headers={"Origin": "https://elsewhere.example"})
+        assert resp.status_code == 403
+        assert calls == []
+
+    def test_bookmarklet_page_says_when_the_port_moved(self, client):
+        assert "moved to" not in client.get("/bookmarklet").get_data(as_text=True)
+        page = client.get("/bookmarklet?moved_from=5001").get_data(as_text=True)
+        assert "5001" in page
+        assert "moved to http://localhost" in page

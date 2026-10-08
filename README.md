@@ -4,17 +4,54 @@ A local read-it-later list. Paste a URL, it gets added to a sortable,
 taggable, read/unread list — and a full copy of the article is saved to disk so
 you still have it when the original goes away.
 
-## Running it
+## Getting it
+
+Download the zip for your computer from the
+[releases page](https://github.com/afriedman412/obomoboe/releases/latest) and
+unzip it. Nothing else to install — Python and everything it needs are inside.
+
+- **Mac** (`obomoboe-mac-apple-silicon.zip` for M-series Macs,
+  `obomoboe-mac-intel.zip` for older ones): drag `obomoboe.app` into
+  Applications and open it. The first time, macOS says it can't check the app
+  for malicious software, because it isn't signed with an Apple developer
+  certificate. Open **System Settings → Privacy & Security**, scroll down to
+  the message about obomoboe and click **Open Anyway**. After that it opens
+  normally.
+- **Windows** (`obomoboe-windows.zip`): put the `obomoboe` folder somewhere
+  that suits you and open `obomoboe.exe` inside it. If SmartScreen says
+  "Windows protected your PC", click **More info → Run anyway**.
+
+Opening the app starts obomoboe in the background and opens it in your
+browser. There's no window of its own: to get back to it, open the app again
+or bookmark the page. To stop it, click **quit** at the top of the page.
+
+The app keeps its data in `~/Library/Application Support/obomoboe` on a Mac
+and `%APPDATA%\obomoboe` on Windows. Back up that folder and you have
+everything. Updating means replacing the app; the data stays where it is.
+
+It runs at `http://127.0.0.1:5001`. If something else already has that port,
+it takes the next free one and keeps using it from then on, since the
+bookmarklet has the address built in. If it ever has to move after you've
+added the bookmarklet, it opens the bookmarklet page so you can drag the new
+one in.
+
+## Running from source
 
 ```sh
 make install     # creates venv/, installs requirements.txt
 make run         # http://127.0.0.1:5001
 make test
+make app         # builds the double-clickable app into dist/
 ```
 
-Everything lives in `data/` (gitignored): `data/obomoboe.db` and
-`data/archives/<article-id>/`. Back that one directory up and you have
-everything.
+Run this way, everything lives in `data/` (gitignored): `data/obomoboe.db`
+and `data/archives/<article-id>/`. `python launcher.py` behaves the way the
+packaged app does, with a background server and a quit button, but keeps
+using `data/`.
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which tests and
+builds the app for Apple Silicon Macs, Intel Macs and Windows and attaches
+the zips to a GitHub release.
 
 There is no login. It binds to `127.0.0.1` and is meant to stay there — the
 archive viewer renders HTML from arbitrary websites, so don't expose it to a
@@ -177,3 +214,5 @@ skip image downloads, `OBOMOBOE_WORKERS`.
 | `src/archiver.py` | writes snapshots to disk, background worker pool |
 | `src/tagging.py` | candidate tags: publisher, keywords, Claude |
 | `src/config.py` | settings and env overrides |
+| `launcher.py` | what the packaged app runs: starts the server, opens the browser |
+| `obomoboe.spec` | PyInstaller build of the app |

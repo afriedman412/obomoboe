@@ -52,7 +52,9 @@ def _humandate(value: str | None) -> str:
     text = str(value).strip().replace("Z", "+00:00")
     for candidate in (text, text[:19], text[:10]):
         try:
-            return datetime.fromisoformat(candidate).strftime("%b %-d, %Y")
+            moment = datetime.fromisoformat(candidate)
+            # Not %-d: Windows' strftime has no way to drop the zero.
+            return f"{moment:%b} {moment.day}, {moment.year}"
         except ValueError:
             continue
     return str(value)[:10]
@@ -74,7 +76,8 @@ def _humantime(value: str | None) -> str:
         return _humandate(value)
     if moment.tzinfo is not None:
         moment = moment.astimezone()
-    return moment.strftime("%b %-d, %Y at %-I:%M %p")
+    hour = moment.hour % 12 or 12
+    return f"{moment:%b} {moment.day}, {moment.year} at {hour}:{moment:%M %p}"
 
 
 def _hostname(url: str | None) -> str:

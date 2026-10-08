@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +28,22 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def default_data_dir() -> Path:
+    """data/ next to the code when run from a checkout. The packaged app's
+    code sits inside the bundle, which is replaced on every update, so it
+    keeps its data where each platform expects an app to."""
+    if not getattr(sys, "frozen", False):
+        return BASE_DIR / "data"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "obomoboe"
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA") or Path.home()) / "obomoboe"
+    xdg = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(xdg) / "obomoboe"
+
+
 def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
-    data_dir = Path(os.environ.get("OBOMOBOE_DATA_DIR", BASE_DIR / "data"))
+    data_dir = Path(os.environ.get("OBOMOBOE_DATA_DIR", default_data_dir()))
     config: dict[str, Any] = {
         "DATA_DIR": data_dir,
         "DB_PATH": data_dir / "obomoboe.db",

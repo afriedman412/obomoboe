@@ -1,0 +1,78 @@
+# Builds the double-clickable app for each platform. Push a tag like v1.0.0
+# to publish a GitHub release with the downloads attached; run it by hand
+# from the Actions tab to just get the builds as workflow artifacts.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: obomoboe-mac-apple-silicon
+          - os: macos-15-intel
+            name: obomoboe-mac-intel
+          - os: windows-latest
+            name: obomoboe-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt pyinstaller
+
+      - name: Test
+        run: python -m pytest tests/ -q
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean obomoboe.spec
+
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: python scripts/smoke_test.py dist/obomoboe.app/Contents/MacOS/obomoboe
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/smoke_test.py dist/obomoboe/obomoboe.exe
+
+      # ditto rather than zip: it keeps the symlinks inside the app bundle,
+      # which macOS needs for the bundle to open.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent dist/obomoboe.app ${{ matrix.name }}.zip
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/obomoboe -DestinationPath ${{ matrix.name }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
+          generate_release_notes: true

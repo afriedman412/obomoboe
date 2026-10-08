@@ -90,7 +90,7 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* Stenciled municipal lettering -- meta, labels, anything administrative. */
 .meta, .pill, .tab, .chip, .crumbs, .byline, .notes label,
-.topbar nav a, .actions, .toolbar button, .search select {
+.topbar nav a, .topbar nav button, .actions, .toolbar button, .search select {
   font-family: var(--stencil);
   font-size: 11.5px;
   letter-spacing: .04em;
@@ -123,8 +123,15 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 }
 .brand:hover { text-decoration: none; color: var(--umber); }
 .topbar nav { display: flex; gap: 16px; }
-.topbar nav a { color: var(--muted); text-transform: uppercase; }
-.topbar nav a:hover { color: var(--umber); }
+.topbar nav a, .topbar nav button { color: var(--muted); text-transform: uppercase; }
+.topbar nav a:hover, .topbar nav button:hover { color: var(--umber); }
+.topbar nav form { display: contents; }
+.topbar nav button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
 
 .flashes { list-style: none; max-width: 900px; margin: 14px auto 0; padding: 0 20px; }
 .flash {

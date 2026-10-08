@@ -44,6 +44,37 @@ def _wants_json() -> bool:
             or request.accept_mimetypes.best == "application/json")
 
 
+@bp.app_context_processor
+def _quit_available() -> dict:
+    return {"can_quit": SHUTDOWN_KEY in current_app.extensions}
+
+
+# Set by the desktop launcher, which owns the server and so is the only thing
+# that can stop it. Run any other way, there is no quit.
+SHUTDOWN_KEY = "obomoboe.shutdown"
+
+
+@bp.route("/ping")
+def ping():
+    """Lets the launcher tell a running obomoboe from whatever else might
+    have the port."""
+    return jsonify({"app": "obomoboe"})
+
+
+@bp.route("/quit", methods=["POST"])
+def quit_app():
+    shutdown = current_app.extensions.get(SHUTDOWN_KEY)
+    if shutdown is None:
+        abort(404)
+    # /capture lets any page post to this server, so check this one came
+    # from our own pages; otherwise any site you visit could switch it off.
+    origin = request.headers.get("Origin")
+    if origin and urlparse(origin).netloc != urlparse(request.url_root).netloc:
+        abort(403)
+    shutdown()
+    return render_template("quit.html", can_quit=False)
+
+
 @bp.route("/")
 def index():
     conn = db.get_db()
@@ -517,4 +548,6 @@ def bookmarklet():
         "alert('obomoboe: no answer from '+b+' -- is it running?');},8000);"
         "})();"
     )
-    return render_template("bookmarklet.html", code=code, base=base)
+    moved_from = request.args.get("moved_from", type=int)
+    return render_template("bookmarklet.html", code=code, base=base,
+                           moved_from=moved_from)

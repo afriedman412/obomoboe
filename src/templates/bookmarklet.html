@@ -5,6 +5,12 @@
 <div class="reader">
   <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
   <h1>One-click saving</h1>
+  {% if moved_from %}
+    <p class="flash flash--error">Something else was using port
+      {{ moved_from }}, so obomoboe has moved to {{ base }}. A bookmarklet
+      you added before still points at the old address &mdash; drag this one
+      to your bookmarks bar in its place.</p>
+  {% endif %}
   <p>Drag this to your bookmarks bar. Clicking it on any page saves that page
     to your list &mdash; sending the article <em>as your browser has it</em>,
     already logged in and already past any bot check.</p>
