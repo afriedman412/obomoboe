@@ -57,7 +57,16 @@
 
     if (trigger.dataset.action === "delete") {
       if (!confirm("Delete this article and its archive?")) return;
-      post("/a/" + id + "/delete", {}).then(function () { item.remove(); });
+      post("/a/" + id + "/delete", {}).then(function () {
+        /* Take the month's heading with it if it was the last one there. */
+        var before = item.previousElementSibling;
+        var after = item.nextElementSibling;
+        item.remove();
+        if (before && before.classList.contains("month-break")
+            && !(after && after.classList.contains("article"))) {
+          before.remove();
+        }
+      });
     }
 
     if (trigger.dataset.action === "add-tag") {
@@ -212,6 +221,70 @@
 
   startPolling();
 
+  /* Coming back to the list after finishing a piece, the browser may show
+     the copy it kept from before -- with that piece still unread. */
+  window.addEventListener("pageshow", function (event) {
+    if (!document.querySelector(".articles")) return;
+    var nav = performance.getEntriesByType
+      && performance.getEntriesByType("navigation")[0];
+    if (event.persisted || (nav && nav.type === "back_forward")) {
+      window.location.reload();
+    }
+  });
+
+  /* Reaching the end of a piece marks it read. It has to be scrolled to,
+     not just landed on: a short piece that fits on screen, or a reload that
+     restores the scroll position, is not reading to the end. Marking it
+     unread again by hand sticks for the rest of the session. */
+  var reader = document.querySelector(".reader[data-id]");
+  var readEnd = reader && reader.querySelector('[data-role="read-end"]');
+  if (readEnd && "IntersectionObserver" in window) {
+    var readerId = reader.dataset.id;
+    var keepKey = "obomoboe:kept-unread:" + readerId;
+    var statusForm = reader.querySelector('[data-role="status-form"]');
+
+    if (statusForm) {
+      statusForm.addEventListener("submit", function () {
+        var target = statusForm.querySelector('[name="status"]').value;
+        try {
+          if (target === "unread") sessionStorage.setItem(keepKey, "1");
+          else sessionStorage.removeItem(keepKey);
+        } catch (e) { /* storage blocked; auto-read may just re-mark it */ }
+      });
+    }
+
+    var keptUnread = false;
+    try { keptUnread = sessionStorage.getItem(keepKey) === "1"; } catch (e) {}
+
+    if (reader.dataset.status === "unread" && !keptUnread) {
+      var armed = false;
+      var observer = new IntersectionObserver(function (entries) {
+        var visible = entries[entries.length - 1].isIntersecting;
+        if (!visible) { armed = true; return; }
+        if (!armed) return;
+        observer.disconnect();
+        post("/a/" + readerId + "/status", { status: "read" })
+          .then(function (data) { if (data.status === "read") showRead(); });
+      });
+      observer.observe(readEnd);
+    }
+
+    function showRead() {
+      reader.dataset.status = "read";
+      if (statusForm) {
+        statusForm.querySelector('[name="status"]').value = "unread";
+        statusForm.querySelector("button").textContent = "Mark unread";
+      }
+      var logged = reader.querySelector('[data-role="logged"]');
+      if (logged && !logged.querySelector(".logged__read")) {
+        var stamp = document.createElement("span");
+        stamp.className = "logged__read";
+        stamp.textContent = "read just now";
+        logged.appendChild(stamp);
+      }
+    }
+  }
+
   /* Add without losing scroll position or the current filter. */
   var addForm = document.getElementById("add-form");
   if (addForm) {
@@ -233,5 +306,47 @@
         })
         .catch(function () { addForm.submit(); });
     });
+  }
+
+  /* Theme settings: redraw the page in whatever is picked, before saving.
+     The CSS mirrors theme.css() on the server. */
+  var themeForm = document.getElementById("theme");
+  var presetData = document.getElementById("theme-presets");
+  if (themeForm && presetData) {
+    var presets = JSON.parse(presetData.textContent);
+    var themeStyle = document.getElementById("theme-css");
+    var TOOTH = {
+      light: "--tooth-blend: multiply; --tooth-opacity: .22;",
+      dark: "--tooth-blend: screen; --tooth-opacity: .1;"
+    };
+
+    function block(selector, palette, mode) {
+      var body = Object.keys(palette).map(function (name) {
+        return "--" + name + ": " + palette[name] + "; ";
+      }).join("");
+      return selector + " { " + body + TOOTH[mode] + " }";
+    }
+
+    function preview() {
+      var picked = themeForm.querySelector('[name="preset"]:checked');
+      var preset = picked && presets[picked.value];
+      if (preset) {
+        themeStyle.textContent = [
+          block(":root", preset.light, "light"),
+          "@media (prefers-color-scheme: dark) { "
+            + block(':root:not([data-theme="light"])', preset.dark, "dark") + " }",
+          block(':root[data-theme="dark"]', preset.dark, "dark")
+        ].join("\n");
+      }
+
+      var mode = themeForm.querySelector('[name="mode"]:checked');
+      if (mode && mode.value !== "auto") {
+        document.documentElement.dataset.theme = mode.value;
+      } else {
+        delete document.documentElement.dataset.theme;
+      }
+    }
+
+    themeForm.addEventListener("change", preview);
   }
 })();

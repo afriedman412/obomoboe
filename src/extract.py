@@ -491,6 +491,10 @@ CHROME_LABELS = {
     "skip to main content", "continue reading the main story",
     "read more", "share this article", "share full article",
 }
+# Labels that vary in their wording or punctuation.
+CHROME_LABEL_PATTERN = re.compile(
+    r"^(there (are no|aren[’']t any) comments yet\.?"
+    r"|be the first to (comment|start the conversation)\b.*)$")
 LABEL_BLOCKS = {"p", "div", "span", "a", "li", "section", "h1", "h2", "h3",
                 "h4", "h5", "h6", "small", "strong", "em"}
 
@@ -614,8 +618,111 @@ def strip_chrome(soup: BeautifulSoup) -> BeautifulSoup:
         if _word_count(tag) > ceiling:
             continue
         tag.decompose()
+    _strip_players(body, ceiling)
     _strip_labels(body)
+    _strip_credits(body)
+    if body.find(id="CONTENT") is not None and body.find("p") is None:
+        # archive.today snapshot: see _paragraphize.
+        _paragraphize(body)
     return soup
+
+
+KICKER_LABELS = {"read more", "related", "related stories", "recommended",
+                 "more stories", "you might also like", "don't miss"}
+KICKER_PATTERN = re.compile(r"^(latest|more|also|trending) (on|from|in|at) "
+                            r"[\w .&'-]{1,30}$")
+CREDIT_LINE = re.compile(r"^(photo(graph)?s?|images?|illustrations?|video)"
+                         r"( by|:)\s*\S.{0,60}$", re.IGNORECASE)
+
+
+def _card_around(label: Any, max_words: int = 80) -> Any:
+    """The recirculation card a kicker like "Read More" heads: the outermost
+    ancestor that is short and made mostly of links."""
+    card = None
+    for element in label.parents:
+        if getattr(element, "name", "") in ("article", "main", "body"):
+            break
+        words = _word_count(element)
+        linked = sum(_word_count(a) for a in element.find_all("a"))
+        if words > max_words or linked < 0.6 * words:
+            break
+        card = element
+    return card
+
+
+def _strip_players(body: Any, ceiling: int, max_words: int = 150) -> None:
+    """Video and audio players, controls and all.
+
+    The reader cannot play them -- the sanitizer unwraps <video> -- so all
+    that would survive is the fallback text and the control labels: "To
+    view this video please enable JavaScript", "Font Size Small Medium
+    Large", "Remaining Time -0:00". Goes up to the outermost wrapper that is
+    still only the player and its caption -- not to one that also holds the
+    piece's own words: nytimes.com sets its listen-to-this player in the
+    header beside the headline and dek.
+    """
+    for media in list(body.find_all(["video", "audio"])):
+        if media.decomposed or not media.parent:
+            continue
+        player = media
+        for element in media.parents:
+            if getattr(element, "name", "") in ("article", "main", "body"):
+                break
+            if _word_count(element) > min(max_words, ceiling):
+                break
+            if element.find(["h1", "h2"]) or any(
+                    _word_count(p) >= 12 for p in element.find_all("p")):
+                break
+            player = element
+        player.decompose()
+
+
+def _strip_credits(body: Any) -> None:
+    """Photo credits whose picture did not survive: "Photo: Getty Images"."""
+    for node in list(body.find_all(string=CREDIT_LINE)):
+        parent = node.parent
+        if parent is None or parent.find_parent(["figure", "figcaption"]):
+            continue
+        # Right after its picture it is a caption, and the picture stayed.
+        before = parent.find_previous_sibling()
+        if before is not None and (before.name == "img" or before.find("img")):
+            continue
+        if " ".join(parent.get_text(" ", strip=True).split()) == \
+                " ".join(str(node).split()):
+            parent.extract()
+
+
+INLINE_TAGS = {"a", "abbr", "b", "br", "cite", "code", "em", "i", "kbd",
+               "mark", "q", "s", "small", "span", "strong", "sub", "sup",
+               "time", "u", "font"}
+
+
+def _paragraphize(body: Any) -> None:
+    """A <div> holding only running text becomes the <p> it stands for.
+
+    archive.today flattens every element to a styled <div>, so a snapshot
+    has no <p> at all. trafilatura then splits each such div at its first
+    link: the text before goes in a <p>, the link and everything after
+    land loose beside it, and the spaces around each link are trimmed
+    ("in a<a>2025 survey</a>at Cornell").
+
+    A div that is a link, sits in one, or sits in a small card made mostly
+    of links is a menu item or a card headline, not a paragraph, and is
+    left for trafilatura to drop. Nor is one inside a heading: snapshots
+    keep <h2>, and a <p> in one splits it apart.
+    """
+    for div in body.find_all("div"):
+        words = _word_count(div)
+        if not words or div.find_parent(["a", *HEADINGS]):
+            continue
+        if sum(_word_count(a) for a in div.find_all("a")) >= words:
+            continue
+        if _card_around(div) is not None:
+            continue
+        if any(isinstance(child, Tag) and child.name not in INLINE_TAGS
+               for child in div.descendants):
+            continue
+        div.name = "p"
 
 
 def _strip_labels(body: Any) -> None:
@@ -627,7 +734,9 @@ def _strip_labels(body: Any) -> None:
     """
     for node in list(body.find_all(string=True)):
         text = " ".join(str(node).split()).lower()
-        if text not in CHROME_LABELS or not node.parent:
+        kicker = text in KICKER_LABELS or bool(KICKER_PATTERN.match(text))
+        label = text in CHROME_LABELS or bool(CHROME_LABEL_PATTERN.match(text))
+        if (not label and not kicker) or not node.parent:
             continue
         doomed = None
         for element in node.parents:
@@ -637,7 +746,9 @@ def _strip_labels(body: Any) -> None:
             if " ".join(element.get_text(" ", strip=True).split()).lower() != text:
                 break
             doomed = element
-        (doomed if doomed is not None else node).extract()
+        doomed = doomed if doomed is not None else node
+        card = _card_around(doomed) if kicker else None
+        (card or doomed).extract()
 
 
 def drop_leading_title(fragment: str, title: str | None) -> str:

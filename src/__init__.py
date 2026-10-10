@@ -33,6 +33,7 @@ def create_app(overrides: dict[str, Any] | None = None) -> Flask:
     app.jinja_env.filters["humandate"] = _humandate
     app.jinja_env.filters["humantime"] = _humantime
     app.jinja_env.filters["hostname"] = _hostname
+    app.jinja_env.filters["monthyear"] = _monthyear
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -78,6 +79,25 @@ def _humantime(value: str | None) -> str:
         moment = moment.astimezone()
     hour = moment.hour % 12 or 12
     return f"{moment:%b} {moment.day}, {moment.year} at {hour}:{moment:%M %p}"
+
+
+def _monthyear(value: str | None) -> str:
+    """ISO timestamp -> 'October 2026', in this machine's timezone when the
+    value carries one. Empty for anything without a usable date."""
+    if not value:
+        return ""
+    from datetime import datetime
+
+    text = str(value).strip().replace("Z", "+00:00")
+    for candidate in (text, text[:19], text[:10], text[:7] + "-01"):
+        try:
+            moment = datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        if moment.tzinfo is not None:
+            moment = moment.astimezone()
+        return f"{moment:%B} {moment.year}"
+    return ""
 
 
 def _hostname(url: str | None) -> str:

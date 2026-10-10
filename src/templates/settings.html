@@ -3,7 +3,10 @@
 
 {% block content %}
 <div class="reader">
-  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; reading list</a></p>
+  {# Nothing to configure here; just a pat on the back. #}
+  <p class="read-tally">YOU HAVE READ {{ read_count }}
+    ARTICLE{{ '' if read_count == 1 else 'S' }}</p>
   <h1>Settings</h1>
 
   <form method="post" class="settings">
@@ -106,6 +109,46 @@
     </section>
 
     <button type="submit" class="primary">Save settings</button>
+  </form>
+
+  <form method="post" class="settings theme-form" id="theme"
+        action="{{ url_for('main.theme_settings') }}">
+    <section>
+      <h2>Theme</h2>
+      <p class="hint">Each colorway comes in light and dark. The page
+        shows your pick straight away; nothing sticks until you save.</p>
+
+      <div class="presets">
+        {% for key, preset in presets.items() %}
+          <label class="preset">
+            <input type="radio" name="preset" value="{{ key }}"
+                   {{ 'checked' if key == theme.preset }}>
+            <span class="preset__swatches" aria-hidden="true">
+              {% for name in ('paper', 'ink', 'accent', 'second', 'highlight') %}
+                <i style="background: {{ preset.light[name] }}"></i>
+              {% endfor %}
+            </span>
+            <span class="preset__name">{{ preset.label }}</span>
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="theme-modes">
+        <strong>Appearance</strong>
+        <span>
+          {% for mode in theme_modes %}
+            <label>
+              <input type="radio" name="mode" value="{{ mode }}"
+                     {{ 'checked' if mode == theme.mode }}>
+              {{ {'auto': 'match system', 'light': 'light', 'dark': 'dark'}[mode] }}
+            </label>
+          {% endfor %}
+        </span>
+      </div>
+    </section>
+
+    <button type="submit" class="primary">Save theme</button>
+    <script type="application/json" id="theme-presets">{{ presets | tojson }}</script>
   </form>
 </div>
 {% endblock %}

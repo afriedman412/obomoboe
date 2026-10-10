@@ -523,3 +523,95 @@ class TestSnapshotTitleAndDate:
         result = extract(page, "https://en.wikipedia.org/wiki/Sourdough")
         assert result.original_url is None
         assert result.published_at.startswith("2026-02-03T10:00")
+
+
+class TestSnapshotFormatting:
+    """archive.today flattens a page to styled <div>s with no class names;
+    see strip_chrome. trafilatura only splits a div at its links inside an
+    <article>, which is where a publisher's body copy usually is."""
+
+    @staticmethod
+    def _snapshot(inner):
+        filler = " ".join(["Plain running text for the article body."] * 6)
+        paras = "".join(f"<div>Paragraph {n}. {filler}</div>" for n in range(6))
+        return (f"<html><body><div id='HEADER'>archive</div><div id='CONTENT'>"
+                f"<article><div><div>{inner}</div>{paras}</div></article>"
+                f"</div></body></html>")
+
+    def test_links_stay_inside_their_paragraph_with_their_spaces(self):
+        page = self._snapshot(
+            "<div>A 2007 study found that <a href='https://e.example/s'>frat "
+            "brothers are more likely</a> than other students; and in a "
+            "<a href='https://e.example/c'>2025 survey</a> at Cornell, more "
+            "said the same thing again and again for many years.</div>")
+        html = extract(page, "https://archive.ph/abc").readable_html
+        soup = BeautifulSoup(html, "lxml")
+        link = soup.find("a", string="2025 survey")
+        assert link is not None and link.find_parent("p") is not None
+        assert "in a <a" in html and "</a> at Cornell" in html
+
+    def test_a_read_more_card_goes_with_its_picture(self):
+        page = self._snapshot(
+            "<div><div>Read More</div><a href='https://e.example/r'>"
+            "<img src='https://e.example/t.jpg' alt='thumb'>Another Headline "
+            "About Something Else Entirely</a><div>By <a href="
+            "'https://e.example/a'>Some Writer</a></div></div>")
+        html = extract(page, "https://archive.ph/abc").readable_html
+        assert "<img" not in html
+        assert "Another Headline" not in html and "Read More" not in html
+
+    def test_latest_on_label_goes_with_its_carousel(self):
+        links = "".join(f"<div><a href='https://e.example/{n}'>Story number "
+                        f"{n} headline</a></div>" for n in range(5))
+        page = self._snapshot(f"<div><div>LATEST ON EXAMPLE</div>{links}</div>")
+        text = extract(page, "https://archive.ph/abc").text
+        assert "LATEST ON EXAMPLE" not in text and "Story number" not in text
+
+    def test_a_credit_without_its_photo_goes(self):
+        page = self._snapshot("<span>Photo: Getty Images</span>")
+        assert "Getty" not in extract(page, "https://archive.ph/abc").text
+
+    def test_a_credit_under_its_photo_stays(self):
+        soup = BeautifulSoup(
+            "<html><body><article><img src='https://e.example/i.jpg'>"
+            "<span>Illustration: Some Artist</span>"
+            f"{_prose('Body')}</article></body></html>", "lxml")
+        assert "Some Artist" in strip_chrome(soup).get_text()
+
+    def test_a_video_player_leaves_no_controls_behind(self):
+        page = self._snapshot(
+            "<div><div><video>To view this video please enable JavaScript"
+            "</video><div>Font Size Small Medium Large Current Time 0:00 "
+            "Remaining Time -0:00</div></div><div>A Video Title</div></div>")
+        text = extract(page, "https://archive.ph/abc").text
+        assert "enable JavaScript" not in text and "Remaining Time" not in text
+        assert "Paragraph 3" in text
+
+    def test_live_pages_keep_their_divs(self):
+        """Only snapshots are rewritten; elsewhere a <div> may be layout."""
+        soup = BeautifulSoup(
+            f"<html><body><div>Some text <a href='/x'>a link</a></div>"
+            f"{_prose('Body')}</body></html>", "lxml")
+        assert strip_chrome(soup).find("div").name == "div"
+
+    def test_menu_links_do_not_become_paragraphs(self):
+        menu = "".join(f"<div><a href='https://e.example/{n}'>Section {n}</a>"
+                       f"</div>" for n in range(4))
+        text = extract(self._snapshot(f"<div>{menu}</div>"),
+                       "https://archive.ph/abc").text
+        assert "Section 2" not in text and "Paragraph 3" in text
+
+    def test_an_empty_comment_box_says_nothing(self):
+        page = self._snapshot(
+            "<div><div>There aren’t any comments yet.</div><div>Be the first "
+            "to start the conversation! You need an account to add or like "
+            "comments.</div></div>")
+        text = extract(page, "https://archive.ph/abc").text
+        assert "comments yet" not in text and "conversation" not in text
+
+    def test_headings_keep_their_parts_together(self):
+        """A <p> inside a snapshot's <h2> splits the heading apart."""
+        page = self._snapshot("<h2><div>14.</div><div>Never send an Edible "
+                              "Arrangement.</div></h2>")
+        heading = strip_chrome(BeautifulSoup(page, "lxml")).find("h2")
+        assert heading.find("p") is None

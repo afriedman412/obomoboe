@@ -343,7 +343,10 @@ def counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 # What the settings page may write, and what each becomes in the app config.
 SETTING_KEYS = ("ANTHROPIC_API_KEY", "LLM_TAGS_ENABLED", "TAG_MODE",
-                "TAG_MODEL", "TAG_SUGGESTIONS")
+                "TAG_MODEL", "TAG_SUGGESTIONS",
+                # Colorway: a preset and light/dark/auto. src/theme.py
+                # checks both.
+                "THEME", "THEME_MODE")
 
 BOOL_SETTINGS = ("LLM_TAGS_ENABLED",)
 INT_SETTINGS = ("TAG_SUGGESTIONS",)

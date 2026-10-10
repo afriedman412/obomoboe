@@ -11,7 +11,7 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
                    render_template, request, send_from_directory, url_for)
 from markupsafe import Markup
 
-from . import archiver, db, tagging
+from . import archiver, db, tagging, theme
 from .extract import archive_ph_submit_url, normalize_url, snapshot_urls
 
 bp = Blueprint("main", __name__)
@@ -49,6 +49,16 @@ def _quit_available() -> dict:
     return {"can_quit": SHUTDOWN_KEY in current_app.extensions}
 
 
+@bp.app_context_processor
+def _theme() -> dict:
+    try:
+        stored = db.get_settings(db.get_db())
+    except sqlite3.Error:
+        current_app.logger.warning("could not read theme", exc_info=True)
+        stored = {}
+    return {"theme": theme.from_settings(stored)}
+
+
 # Set by the desktop launcher, which owns the server and so is the only thing
 # that can stop it. Run any other way, there is no quit.
 SHUTDOWN_KEY = "obomoboe.shutdown"
@@ -78,7 +88,8 @@ def quit_app():
 @bp.route("/")
 def index():
     conn = db.get_db()
-    status = request.args.get("status", "all")
+    # Opens on what is still to read; the full list is one tab away.
+    status = request.args.get("status", "unread")
     tag = request.args.get("tag") or None
     query = (request.args.get("q") or "").strip() or None
     sort = request.args.get("sort", "added_desc")
@@ -468,7 +479,23 @@ def settings():
         and not db.get_settings(conn).get("ANTHROPIC_API_KEY"),
         sdk_installed=tagging.sdk_installed(),
         llm_ready=tagging.llm_available(config),
+        presets=theme.PRESETS,
+        read_count=db.counts(conn)["read"],
+        theme_modes=theme.MODES,
     )
+
+
+@bp.post("/settings/theme")
+def theme_settings():
+    conn = db.get_db()
+    preset = theme.preset_name(request.form.get("preset"))
+    mode = request.form.get("mode")
+    values: dict = {"THEME": preset,
+                    "THEME_MODE": mode if mode in theme.MODES else "auto"}
+
+    db.set_settings(conn, values)
+    flash("Theme saved", "ok")
+    return redirect(url_for("main.settings") + "#theme")
 
 
 @bp.post("/a/<int:article_id>/suggestions/accept")

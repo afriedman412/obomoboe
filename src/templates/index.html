@@ -20,14 +20,14 @@
 
 <div class="controls">
   <div class="tabs">
-    <a class="tab {{ 'is-on' if status == 'all' }}" href="{{ querylink(new_status='all') }}">
-      All <span>{{ counts.total }}</span>
-    </a>
     <a class="tab {{ 'is-on' if status == 'unread' }}" href="{{ querylink(new_status='unread') }}">
       Unread <span>{{ counts.unread }}</span>
     </a>
     <a class="tab {{ 'is-on' if status == 'read' }}" href="{{ querylink(new_status='read') }}">
       Read <span>{{ counts.read }}</span>
+    </a>
+    <a class="tab {{ 'is-on' if status == 'all' }}" href="{{ querylink(new_status='all') }}">
+      All <span>{{ counts.total }}</span>
     </a>
   </div>
 
@@ -62,13 +62,28 @@
 
 {% if not articles %}
   <p class="empty">
-    {% if query or tag %}Nothing matches that.{% else %}
+    {% if query or tag %}Nothing matches that.
+    {% elif status == 'unread' and counts.total %}All caught up.
+      <a href="{{ querylink(new_status='all') }}">See everything</a>.
+    {% else %}
     Nothing here yet. Paste a URL above to start.{% endif %}
   </p>
 {% endif %}
 
+{# Month breaks follow whichever date the list is sorted by; sorted any
+   other way, dates are scattered and a break would mean nothing. #}
+{% set break_on = {'added_desc': 'added_at', 'added_asc': 'added_at',
+                   'published': 'published_at'}.get(sort) %}
+{% set section = namespace(label=None) %}
 <ul class="articles">
   {% for a in articles %}
+  {% if break_on %}
+    {% set label = (a[break_on] | monthyear) or 'Undated' %}
+    {% if label != section.label %}
+      {% set section.label = label %}
+      <li class="month-break" role="presentation"><h2>{{ label }}</h2></li>
+    {% endif %}
+  {% endif %}
   <li class="article {{ 'is-read' if a.status == 'read' }}"
       data-id="{{ a.id }}" data-archive="{{ a.archive_status }}">
     <button class="toggle" type="button" data-action="toggle"
@@ -131,7 +146,7 @@
       <button type="submit" form="tagform-{{ a.id }}" name="dismiss" value="1"
               data-action="commit-removals"
               title="Remove marked tags, drop unkept suggestions"
-              >dismiss</button>
+              >dismiss tags</button>
       <button type="button" data-action="delete">delete</button>
     </div>
   </li>

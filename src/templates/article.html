@@ -3,8 +3,9 @@
 {% block title %}{{ article.title or article.url }}{% endblock %}
 
 {% block content %}
-<article class="reader">
-  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; all articles</a></p>
+<article class="reader" data-id="{{ article.id }}"
+         data-status="{{ article.status }}">
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; reading list</a></p>
 
   <h1>{{ article.title or article.url }}</h1>
 
@@ -38,7 +39,7 @@
 
   {# When it entered the list and when you finished it -- your history with
      the piece, kept apart from the byline, which describes the piece. #}
-  <p class="logged">
+  <p class="logged" data-role="logged">
     <span>added {{ article.added_at | humantime }}</span>
     {% if article.read_at %}
       <span class="logged__read">read {{ article.read_at | humantime }}</span>
@@ -46,7 +47,8 @@
   </p>
 
   <div class="toolbar">
-    <form method="post" action="{{ url_for('main.set_status', article_id=article.id) }}">
+    <form method="post" action="{{ url_for('main.set_status', article_id=article.id) }}"
+          data-role="status-form">
       <input type="hidden" name="status"
              value="{{ 'unread' if article.status == 'read' else 'read' }}">
       <button type="submit" class="primary">
@@ -108,6 +110,8 @@
 
   {% if body %}
     <div class="prose">{{ body }}</div>
+    {# Reaching this marks the piece read; see app.js. #}
+    <div class="read-end" data-role="read-end" aria-hidden="true"></div>
   {% elif article.archive_status == 'pending' %}
     <p class="empty">Archiving now &mdash; reload in a moment.</p>
   {% else %}
