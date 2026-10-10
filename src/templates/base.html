@@ -1,10 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme.mode != 'auto' %} data-theme="{{ theme.mode }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}obomoboe{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style id="theme-css">{{ theme.css | safe }}</style>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128214;</text></svg>">
 </head>
 <body>

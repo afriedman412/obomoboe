@@ -1,6 +1,8 @@
+import re
+
 from bs4 import BeautifulSoup
 
-from src import archiver, db
+from src import archiver, db, theme
 
 
 def add(client, url, tags=""):
@@ -51,6 +53,65 @@ class TestListing:
 
         read = client.get("/?status=read").get_data(as_text=True)
         assert "example.com/a" in read and "example.com/b" not in read
+
+    def test_home_opens_on_unread(self, client, conn):
+        first = add(client, "https://example.com/a").get_json()["id"]
+        add(client, "https://example.com/b")
+        db.set_status(conn, first, db.READ)
+
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        assert "Unread" in soup.select_one(".tab.is-on").get_text()
+        page = str(soup)
+        assert "example.com/b" in page and "example.com/a" not in page
+
+        everything = client.get("/?status=all").get_data(as_text=True)
+        assert "example.com/a" in everything and "example.com/b" in everything
+
+    def test_tabs_run_unread_read_all(self, client):
+        soup = BeautifulSoup(client.get("/").get_data(as_text=True), "lxml")
+        labels = [tab.get_text(" ", strip=True).split()[0]
+                  for tab in soup.select(".tabs .tab")]
+        assert labels == ["Unread", "Read", "All"]
+
+    def test_empty_unread_says_caught_up(self, client, conn):
+        article_id = add(client, "https://example.com/a").get_json()["id"]
+        db.set_status(conn, article_id, db.READ)
+        assert "All caught up" in client.get("/").get_data(as_text=True)
+
+    def _dated(self, conn, slug, added, published=None):
+        article_id = db.insert_article(conn, url=f"https://e.example/{slug}",
+                                       original_url=f"https://e.example/{slug}")
+        db.update_article(conn, article_id, title=slug, added_at=added,
+                          published_at=published)
+        return article_id
+
+    def _breaks(self, client, query):
+        soup = BeautifulSoup(client.get("/" + query).get_data(as_text=True), "lxml")
+        return [li.get_text(strip=True) if "month-break" in li["class"]
+                else li.select_one(".title").get_text(strip=True)
+                for li in soup.select(".articles > li")]
+
+    def test_month_breaks_follow_date_added(self, client, conn):
+        self._dated(conn, "oct-a", "2026-10-05T12:00:00")
+        self._dated(conn, "oct-b", "2026-10-01T12:00:00")
+        self._dated(conn, "aug", "2026-08-20T12:00:00")
+        self._dated(conn, "dec", "2025-12-15T12:00:00")
+        assert self._breaks(client, "?status=all") == [
+            "October 2026", "oct-a", "oct-b", "August 2026", "aug",
+            "December 2025", "dec"]
+        assert self._breaks(client, "?status=all&sort=added_asc")[:2] == [
+            "December 2025", "dec"]
+
+    def test_month_breaks_follow_date_published(self, client, conn):
+        self._dated(conn, "new", "2026-10-05T12:00:00", "2024-03-02")
+        self._dated(conn, "undated", "2026-10-04T12:00:00")
+        assert self._breaks(client, "?status=all&sort=published") == [
+            "March 2024", "new", "Undated", "undated"]
+
+    def test_no_month_breaks_when_dates_are_not_the_order(self, client, conn):
+        self._dated(conn, "b", "2026-10-05T12:00:00")
+        self._dated(conn, "a", "2026-08-05T12:00:00")
+        assert self._breaks(client, "?status=all&sort=title") == ["a", "b"]
 
     def test_tag_filter(self, client):
         add(client, "https://example.com/a", "python")
@@ -574,7 +635,7 @@ class TestListStatusButton:
         db.update_article(conn, article_id, title="Piece")
         assert "mark read" in client.get("/").get_data(as_text=True)
         db.set_status(conn, article_id, db.READ)
-        assert "mark unread" in client.get("/").get_data(as_text=True)
+        assert "mark unread" in client.get("/?status=all").get_data(as_text=True)
 
 
 class TestArchiveMarks:
@@ -646,6 +707,27 @@ class TestReadingDates:
         soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
         assert "read" in soup.select_one(".logged__read").get_text().lower()
 
+    def test_end_of_text_is_marked_for_auto_read(self, client, conn, app):
+        article_id = db.insert_article(conn, url="https://e.example/d4",
+                                       original_url="https://e.example/d4")
+        db.update_article(conn, article_id, archive_status=db.OK)
+        path = archiver.article_dir(app.config, article_id) / "readable.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("<p>Body text.</p>", encoding="utf-8")
+
+        soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        reader = soup.select_one(".reader")
+        assert reader["data-id"] == str(article_id)
+        assert reader["data-status"] == "unread"
+        # The sentinel comes after the text, so reaching it means reaching the end.
+        assert soup.select_one(".prose").find_next_sibling()["data-role"] == "read-end"
+
+    def test_no_auto_read_without_text(self, client, conn):
+        article_id = db.insert_article(conn, url="https://e.example/d5",
+                                       original_url="https://e.example/d5")
+        soup = BeautifulSoup(client.get(f"/a/{article_id}").get_data(as_text=True), "lxml")
+        assert soup.select_one('[data-role="read-end"]') is None
+
     def test_marking_unread_clears_the_read_date(self, client, conn):
         """set_status already nulls read_at; the page must not keep showing it."""
         article_id = db.insert_article(conn, url="https://e.example/d3",
@@ -687,3 +769,73 @@ class TestDesktopApp:
         page = client.get("/bookmarklet?moved_from=5001").get_data(as_text=True)
         assert "5001" in page
         assert "moved to http://localhost" in page
+
+
+class TestReadTally:
+    def test_settings_counts_what_you_have_read(self, client, conn):
+        for n in range(3):
+            article_id = add(client, f"https://example.com/{n}").get_json()["id"]
+            if n:
+                db.set_status(conn, article_id, db.READ)
+        soup = BeautifulSoup(client.get("/settings").get_data(as_text=True), "lxml")
+        assert " ".join(soup.select_one(".read-tally").get_text().split()) == \
+            "YOU HAVE READ 2 ARTICLES"
+
+    def test_it_sits_above_the_heading(self, client):
+        soup = BeautifulSoup(client.get("/settings").get_data(as_text=True), "lxml")
+        assert soup.select_one(".read-tally").find_next_sibling("h1")
+
+    def test_one_article_is_singular(self, client, conn):
+        db.set_status(conn, add(client, "https://example.com/a").get_json()["id"],
+                      db.READ)
+        soup = BeautifulSoup(client.get("/settings").get_data(as_text=True), "lxml")
+        assert " ".join(soup.select_one(".read-tally").get_text().split()) == \
+            "YOU HAVE READ 1 ARTICLE"
+
+
+class TestTheme:
+    def test_pages_carry_the_default_palette(self, client):
+        page = client.get("/").get_data(as_text=True)
+        assert "--paper: #fcecd8;" in page
+        assert ':root[data-theme="dark"]' in page, "CSS was HTML-escaped"
+        assert "data-theme=" not in page.split("<head>")[0]
+
+    def test_capture_window_is_themed_too(self, client):
+        client.post("/settings/theme", data={"preset": "cyanotype"})
+        page = client.get("/capture/window").get_data(as_text=True)
+        assert theme.PRESETS["cyanotype"]["light"]["paper"] in page
+
+    def test_choosing_a_preset(self, client, conn):
+        client.post("/settings/theme", data={"preset": "plum"})
+        assert db.get_settings(conn)["THEME"] == "plum"
+        page = client.get("/").get_data(as_text=True)
+        assert f"--accent: {theme.PRESETS['plum']['light']['accent']};" in page
+
+    def test_an_unknown_preset_falls_back_to_the_default(self, client, conn):
+        client.post("/settings/theme",
+                    data={"preset": "</style><script>alert(1)</script>"})
+        page = client.get("/").get_data(as_text=True)
+        assert "alert(1)" not in page
+        assert "--paper: #fcecd8;" in page
+
+    def test_appearance_pins_light_or_dark(self, client):
+        client.post("/settings/theme", data={"preset": "umber", "mode": "dark"})
+        assert '<html lang="en" data-theme="dark">' in \
+            client.get("/").get_data(as_text=True)
+        client.post("/settings/theme",
+                    data={"preset": "umber", "mode": "sideways"})
+        assert "data-theme=" not in \
+            client.get("/").get_data(as_text=True).split("<head>")[0]
+
+    def test_every_preset_sets_every_color(self):
+        for preset in theme.PRESETS.values():
+            for mode in ("light", "dark"):
+                assert set(preset[mode]) == set(theme.TOKEN_NAMES)
+                assert all(re.fullmatch(r"#[0-9a-f]{6}", v)
+                           for v in preset[mode].values())
+
+    def test_settings_page_offers_presets_not_pickers(self, client):
+        soup = BeautifulSoup(client.get("/settings").get_data(as_text=True), "lxml")
+        names = [el.get_text() for el in soup.select(".preset__name")]
+        assert names == [p["label"] for p in theme.PRESETS.values()]
+        assert soup.select('input[type="color"]') == []
