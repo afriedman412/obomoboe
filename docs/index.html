@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>obomoboe</title>
+  <meta name="description" content="A read-it-later list that keeps its own copy. Download obomoboe for Mac or Windows.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>&#128214;</text></svg>">
+  <style>
+  :root {
+    --paper: #fcecd8;
+    --panel: #fff6e9;
+    --ink: #2a1608;
+    --muted: #7a5b3e;
+    --line: #ddc4a2;
+    --edge: #2a1608;
+    --accent: #6e3511;
+    --highlight: #91ac67;
+    --second-deep: #4f6b23;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+             Georgia, ui-serif, serif;
+    --stencil: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+               "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #17100a;
+      --panel: #201710;
+      --ink: #f2e2cc;
+      --muted: #b09373;
+      --line: #3d2c1c;
+      --edge: #5d4630;
+      --accent: #d08a49;
+      --highlight: #91ac67;
+      --second-deep: #9dbe6e;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #17100a;
+    --panel: #201710;
+    --ink: #f2e2cc;
+    --muted: #b09373;
+    --line: #3d2c1c;
+    --edge: #5d4630;
+    --accent: #d08a49;
+    --highlight: #91ac67;
+    --second-deep: #9dbe6e;
+  }
+
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.55 var(--serif);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: clamp(40px, 10vw, 96px) 56px;
+    display: grid;
+    gap: 40px;
+  }
+
+  .name {
+    margin: 0;
+    font-size: clamp(56px, 14vw, 112px);
+    font-weight: 700;
+    line-height: .95;
+    letter-spacing: -.02em;
+    /* The rule under the masthead in the app, drawn as a stamp. */
+    padding-bottom: 14px;
+    border-bottom: 3px solid var(--edge);
+    box-shadow: 0 3px 0 var(--highlight);
+  }
+
+  .blurb {
+    margin: 0;
+    max-width: 34em;
+    font-size: clamp(18px, 2.6vw, 21px);
+    text-wrap: pretty;
+  }
+
+  .downloads {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+  }
+
+  .platform { display: grid; gap: 10px; align-content: start; }
+
+  /* A paving slab, like each article in the list. */
+  .get {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    padding: 30px 20px 24px;
+    background: var(--panel);
+    color: var(--ink);
+    border: 1.5px solid var(--edge);
+    border-left: 7px solid var(--highlight);
+    border-radius: 2px;
+    box-shadow: 4px 4px 0 var(--edge);
+    text-decoration: none;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .get:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 var(--edge);
+  }
+  .get:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--edge); }
+  .get:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+
+  .get svg { width: 112px; height: 112px; color: var(--accent); }
+
+  .get__label {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .get__file {
+    font-family: var(--stencil);
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--second-deep);
+  }
+
+  .alt {
+    margin: 0;
+    padding-left: 10px;
+    font-family: var(--stencil);
+    font-size: 12.5px;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+  .alt a { color: var(--accent); }
+
+  .foot {
+    margin: 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-family: var(--stencil);
+    font-size: 12.5px;
+    letter-spacing: .04em;
+    color: var(--muted);
+  }
+  .foot a { color: var(--accent); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .get, .get:hover, .get:active { transition: none; transform: none; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1 class="name">obomoboe</h1>
+
+  <p class="blurb">A read-it-later list that keeps its own copy. Save an
+    article and it goes on a list you can sort, tag, search and mark as read,
+    and the whole piece, images included, is kept on your computer &mdash; so
+    you still have it after the original changes or disappears.</p>
+
+  <section class="downloads" aria-label="Download">
+    <div class="platform">
+      <a class="get" id="get-mac"
+         href="https://github.com/afriedman412/obomoboe/releases/latest/download/obomoboe-mac-apple-silicon.zip">
+        <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <!-- A compact Mac: the case, the screen, the floppy slot. -->
+          <rect x="14" y="4" width="36" height="50" rx="4" fill="currentColor"/>
+          <rect x="19" y="9" width="26" height="21" rx="1.5" style="fill: var(--panel)"/>
+          <rect x="34" y="40" width="10" height="2.5" rx="1" style="fill: var(--panel)"/>
+          <rect x="20" y="40" width="5" height="2.5" rx="1" style="fill: var(--panel)"/>
+          <rect x="17" y="54" width="30" height="6" rx="1.5" fill="currentColor"/>
+        </svg>
+        <span class="get__label">Mac</span>
+        <span class="get__file">Apple Silicon &middot; .zip</span>
+      </a>
+      <p class="alt">Older Intel Mac?
+        <a href="https://github.com/afriedman412/obomoboe/releases/latest/download/obomoboe-mac-intel.zip">Get
+          the Intel build</a></p>
+    </div>
+
+    <div class="platform">
+      <a class="get" id="get-windows"
+         href="https://github.com/afriedman412/obomoboe/releases/latest/download/obomoboe-windows.zip">
+        <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <!-- A window in four panes. -->
+          <rect x="6" y="8" width="24" height="22" rx="1.5" fill="currentColor"/>
+          <rect x="34" y="8" width="24" height="22" rx="1.5" fill="currentColor"/>
+          <rect x="6" y="34" width="24" height="22" rx="1.5" fill="currentColor"/>
+          <rect x="34" y="34" width="24" height="22" rx="1.5" fill="currentColor"/>
+        </svg>
+        <span class="get__label">Windows</span>
+        <span class="get__file">64-bit &middot; .zip</span>
+      </a>
+      <p class="alt">If SmartScreen stops it: More info &rarr; Run anyway.</p>
+    </div>
+  </section>
+
+  <p class="foot">Always the latest build. Free, and the source is on
+    <a href="https://github.com/afriedman412/obomoboe">GitHub</a>.</p>
+</main>
+</body>
+</html>
