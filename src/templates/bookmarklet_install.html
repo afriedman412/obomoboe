@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en"{% if theme.mode != 'auto' %} data-theme="{{ theme.mode }}"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>add the button &middot; obomoboe</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style id="theme-css">{{ theme.css | safe }}</style>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 32px 20px;
+      background: var(--paper);
+      color: var(--ink);
+      font: 16px/1.55 var(--serif);
+    }
+    .install {
+      max-width: 620px;
+      display: grid;
+      justify-items: center;
+      gap: 26px;
+      text-align: center;
+    }
+    .install__brand {
+      font-family: var(--stencil);
+      font-size: 12px;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--second-deep);
+    }
+    .install h1 {
+      margin: 0;
+      font-size: clamp(26px, 5vw, 38px);
+      line-height: 1.2;
+      letter-spacing: -.015em;
+      text-wrap: balance;
+    }
+    .install h1 span { color: var(--accent); }
+
+    /* The button is the bookmark: its text becomes the bookmark's name, so
+       it says only that. The grip is drawn, not written. */
+    .drag-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      padding: 22px 34px 22px 26px;
+      background: var(--accent);
+      color: var(--on-accent);
+      border: 2px solid var(--line-hard);
+      border-radius: var(--radius);
+      box-shadow: 6px 6px 0 var(--line-hard);
+      font-family: var(--stencil);
+      font-size: clamp(18px, 3.4vw, 24px);
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      text-decoration: none;
+      cursor: grab;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .drag-button::before {
+      content: "";
+      width: 14px;
+      height: 26px;
+      flex: none;
+      background-image: radial-gradient(currentColor 1.6px, transparent 1.8px);
+      background-size: 7px 7px;
+      opacity: .75;
+    }
+    .drag-button:hover {
+      text-decoration: none;
+      transform: translate(-2px, -2px);
+      box-shadow: 8px 8px 0 var(--line-hard);
+    }
+    .drag-button:active { cursor: grabbing; }
+    .drag-button:focus-visible { outline: 3px solid var(--highlight); outline-offset: 4px; }
+
+    .install__tip { margin: 0; color: var(--muted); max-width: 30em; }
+    .install__tip kbd {
+      font-family: var(--stencil);
+      font-size: 13px;
+      padding: 1px 6px;
+      border: 1px solid var(--line);
+      border-bottom-width: 2px;
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: var(--ink);
+    }
+    .install__nudge {
+      margin: 0;
+      min-height: 1.5em;
+      font-family: var(--stencil);
+      font-size: 13px;
+      letter-spacing: .04em;
+      color: var(--danger);
+    }
+    .install__more { font-size: 14px; color: var(--muted); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .drag-button, .drag-button:hover { transition: none; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="install">
+    <span class="install__brand">obomoboe</span>
+    <h1>Drag this button into your bookmarks bar to
+      <span>save articles to obomoboe</span>.</h1>
+
+    <a class="drag-button" id="drag-button" href="{{ code }}"
+       title="Drag me to your bookmarks bar">Save to obomoboe</a>
+
+    <p class="install__nudge" id="nudge" role="status" aria-live="polite"></p>
+
+    <p class="install__tip">No bookmarks bar? Press <kbd>&#8984;&#8679;B</kbd>
+      on a Mac or <kbd>Ctrl+Shift+B</kbd> on Windows &mdash; in Safari, View
+      &rarr; Show Favorites Bar. Then, on any article, click
+      <strong>Save to obomoboe</strong>.</p>
+
+    <a class="install__more" href="{{ url_for('main.bookmarklet') }}">More
+      help with the bookmarklet</a>
+  </main>
+  <script>
+    // Clicked here it would only try to save this page; it wants dragging.
+    document.getElementById("drag-button").addEventListener("click", function (event) {
+      event.preventDefault();
+      document.getElementById("nudge").textContent =
+        "Drag it up to your bookmarks bar — clicking only works on an article.";
+    });
+  </script>
+</body>
+</html>

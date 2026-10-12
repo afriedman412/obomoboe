@@ -22,12 +22,22 @@ for package in ("trafilatura", "justext", "courlan", "htmldate", "tld",
 # the machine that built it but gets stopped by Gatekeeper anywhere else.
 codesign_identity = os.environ.get("OBOMOBOE_CODESIGN_IDENTITY") or None
 
+# pywebview picks its platform backend at runtime, so name it here.
+if sys.platform == "darwin":
+    window_imports = ["webview.platforms.cocoa"]
+elif sys.platform == "win32":
+    window_imports = ["webview.platforms.winforms",
+                      "webview.platforms.edgechromium", "clr"]
+else:
+    window_imports = []
+
 a = Analysis(
     ["launcher.py"],
     datas=datas,
     # Imported inside create_app and the routes rather than at the top.
-    hiddenimports=collect_submodules("src") + ["anthropic"],
-    excludes=["tkinter", "pytest", "gunicorn"],
+    hiddenimports=collect_submodules("src") + ["anthropic"] + window_imports,
+    excludes=["tkinter", "pytest", "gunicorn", "PyQt5", "PyQt6", "PySide2",
+              "PySide6", "gi", "cefpython3"],
 )
 pyz = PYZ(a.pure)
 
@@ -37,8 +47,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="obomoboe",
-    # No terminal window: the launcher opens the browser and exits, and the
-    # server runs in the background until you press quit.
+    # No terminal window: the app shows its own window instead.
     console=False,
     upx=False,
     codesign_identity=codesign_identity,
@@ -53,7 +62,7 @@ if sys.platform == "darwin":
         codesign_identity=codesign_identity,
         info_plist={
             "CFBundleDisplayName": "obomoboe",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleShortVersionString": "1.2.0",
             "NSHighResolutionCapable": True,
         },
     )

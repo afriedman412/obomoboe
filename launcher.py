@@ -1,13 +1,17 @@
 """Desktop entry point -- what the packaged app runs.
 
-Opening the app makes sure a server is running, opens the list in the
-browser, and exits. The server is this same program started again with
---serve, detached, so it keeps running until you press quit in the page.
+Opening the app starts the server inside it and shows the list in a window
+of its own: no address bar, no tabs, and a File menu to bring the window
+back or quit. The server lives exactly as long as the app does, so the
+bookmarklet works while the app is open and quitting really stops it.
 
-The split matters on a Mac: opening an app that is still running only brings
-it to the front, which for an app with no window would do nothing at all.
-Because the launcher has always exited by then, opening the app a second time
-runs it again, it finds the server already up, and the browser opens.
+On a Mac, closing the window only hides it -- the app stays in the Dock,
+and the Dock icon or File > Show obomoboe brings it back. On Windows,
+closing the window quits, as Windows apps do.
+
+`--serve PORT` runs just the server with no window, which is what the
+release smoke test starts. `--check-window` imports the window toolkit and
+exits, so the smoke test can tell the build left nothing out.
 """
 from __future__ import annotations
 
@@ -17,88 +21,242 @@ import socket
 import subprocess
 import sys
 import threading
-import time
 import urllib.error
 import urllib.request
 import webbrowser
 from pathlib import Path
+from typing import Any
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 5001
 PORTS_TO_TRY = 100
-STARTUP_TIMEOUT = 90  # first launch of a fresh download is slow on macOS
 
 
 def main() -> None:
-    if "--serve" in sys.argv[1:]:
-        serve(int(sys.argv[sys.argv.index("--serve") + 1]))
+    args = sys.argv[1:]
+    if "--serve" in args:
+        serve(int(args[args.index("--serve") + 1]))
+    elif "--check-window" in args:
+        check_window()
     else:
         launch()
 
 
 def launch() -> None:
-    """Find the running server or start one, then open it.
+    """Find the running server or start one, then show it.
 
     The bookmarklet has the address baked into it, so the port is kept
     between runs (see _saved_port) rather than chosen afresh each time.
     Only when that port has been taken by something else does it move, and
     then the bookmarklet page is opened to say it needs adding again.
+
+    A server that is already up belongs to another copy of the app (or to
+    an older version, which ran its server in the background): this one
+    opens a window onto it rather than starting a second.
     """
     saved = _saved_port()
     port = saved or _wanted_port()
     state = _probe(port)
-    if state == "up":
-        webbrowser.open(_url(port))
-        return
 
     moved_from = None
-    if state == "other" or not _port_free(port):
-        moved_from = port if saved else None  # nothing to move on first run
-        port = _free_port_after(port)
+    server = None
+    if state != "up":
+        if state == "other" or not _port_free(port):
+            moved_from = port if saved else None  # nothing to move on first run
+            port = _free_port_after(port)
+        try:
+            server = _start_server_thread(port)
+        except Exception as exc:  # noqa: BLE001 -- shown to the person instead
+            _fail(f"obomoboe could not start: {exc}\n\n" + _log_tail())
 
-    server = _start_server(port)
-    deadline = time.monotonic() + STARTUP_TIMEOUT
-    while _probe(port) != "up":
-        if server.poll() is not None:
-            _fail("obomoboe could not start.\n\n" + _log_tail())
-        if time.monotonic() > deadline:
-            _fail("obomoboe is taking too long to start.\n\n"
-                  f"The log is at {_data_dir() / 'obomoboe.log'}")
-        time.sleep(0.25)
+    start = _url(port) + (f"bookmarklet?moved_from={moved_from}"
+                          if moved_from else "")
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        # Run from a checkout without the window toolkit: use the browser,
+        # and keep serving until interrupted.
+        webbrowser.open(start)
+        if server is not None:
+            server.done.wait()
+        return
+    _run_window(port, start, server)
 
-    if moved_from:
-        webbrowser.open(_url(port) + f"bookmarklet?moved_from={moved_from}")
-    else:
-        webbrowser.open(_url(port))
+
+def _run_window(port: int, start: str, server: Any) -> None:
+    import webview
+    from webview.menu import Menu, MenuAction, MenuSeparator
+
+    base = _url(port)
+    quitting = threading.Event()
+
+    def show() -> None:
+        window.show()
+
+    def reading_list() -> None:
+        window.show()
+        window.load_url(base)
+
+    def quit_app() -> None:
+        quitting.set()
+        if server is not None:
+            server.stop()
+        else:
+            _post_quit(port)
+        window.destroy()
+
+    window = webview.create_window(
+        "obomoboe", start, width=1100, height=840, min_size=(420, 480),
+        text_select=True)
+
+    def on_closing() -> bool:
+        if quitting.is_set() or sys.platform != "darwin":
+            return True
+        # Hidden, not closed: a Mac app outlives its window.
+        threading.Thread(target=window.hide, daemon=True).start()
+        return False
+
+    window.events.closing += on_closing
+
+    if server is not None:
+        # The page's own quit button ends the app, not just the server.
+        server.on_quit = quit_app
+
+    menu = [Menu("File", [
+        MenuAction("Show obomoboe", show),
+        MenuAction("Go to reading list", reading_list),
+        MenuSeparator(),
+        MenuAction("Set up the bookmarklet in your browser\u2026",
+                   lambda: webbrowser.open(base + "bookmarklet/install")),
+        MenuAction("Open this page in your browser",
+                   lambda: webbrowser.open(window.get_current_url() or base)),
+        MenuSeparator(),
+        MenuAction("Quit obomoboe", quit_app),
+    ])]
+
+    if sys.platform == "darwin":
+        _mac_app_hooks(show, quitting)
+
+    webview.start(menu=menu, private_mode=False,
+                  storage_path=str(_data_dir() / "window"))
+
+    # The window is gone, however that happened: take the server with it.
+    if server is not None:
+        server.stop()
+        server.done.wait(10)
+
+
+def _mac_app_hooks(show: Any, quitting: threading.Event) -> None:
+    """Teach pywebview's Cocoa app two things a Mac app does.
+
+    Clicking the Dock icon brings back a hidden window. And Quit really
+    quits: pywebview asks each window whether it may close before the app
+    terminates, and ours says no so the close button can hide it -- so mark
+    the app as quitting first.
+    """
+    import objc
+    from webview.platforms.cocoa import BrowserView
+
+    delegate = BrowserView.AppDelegate
+    should_terminate = delegate.applicationShouldTerminate_
+
+    def terminate(self: Any, app: Any) -> Any:
+        quitting.set()
+        return should_terminate(self, app)
+
+    def reopen(self: Any, app: Any, has_visible_windows: bool) -> bool:
+        show()
+        return True
+
+    objc.classAddMethods(delegate, [
+        objc.selector(terminate, selector=b"applicationShouldTerminate:",
+                      signature=should_terminate.signature),
+        objc.selector(reopen,
+                      selector=b"applicationShouldHandleReopen:hasVisibleWindows:",
+                      signature=b"Z@:@Z"),
+    ])
+
+
+def check_window() -> None:
+    """Import what the window needs on this platform, then exit. A frozen
+    build that left part of it out fails here instead of on someone's
+    desktop."""
+    import webview  # noqa: F401
+
+    if sys.platform == "darwin":
+        import webview.platforms.cocoa  # noqa: F401
+    elif sys.platform == "win32":
+        import webview.platforms.winforms  # noqa: F401
+    print("window support ok")
+
+
+def _post_quit(port: int) -> None:
+    request = urllib.request.Request(
+        _url(port) + "quit", method="POST",
+        headers={"Origin": _url(port).rstrip("/")})
+    try:
+        urllib.request.urlopen(request, timeout=5).close()
+    except (urllib.error.URLError, OSError):
+        pass
 
 
 def serve(port: int) -> None:
-    """Run the server in this process until /quit."""
-    data_dir = _data_dir()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    log = data_dir / "obomoboe.log"
-    # A detached process has nowhere to print to; a windowed build on
-    # Windows has no stdout at all.
-    sys.stdout = sys.stderr = open(log, "w", buffering=1, encoding="utf-8")
+    """Run just the server, in this process, until /quit."""
+    server = _start_server_thread(port)
+    server.done.wait()
 
-    from werkzeug.serving import make_server
 
-    from src import create_app
-    from src.routes import SHUTDOWN_KEY
+class _Server:
+    """The app's server on a background thread.
 
-    app = create_app()
-    server = make_server(HOST, port, app, threaded=True)
-    # Written once the port is ours, so the next launch looks here.
-    (data_dir / "port").write_text(str(port))
-    # Keep track of request threads so server_close() waits for them;
-    # otherwise the process exits under the /quit request and the page
-    # saying it stopped never reaches the browser.
-    server.daemon_threads = False
-    app.extensions[SHUTDOWN_KEY] = lambda: threading.Thread(
-        target=server.shutdown, daemon=True).start()
-    print(f"obomoboe serving on {_url(port)} -- data in {data_dir}")
-    server.serve_forever()
-    server.server_close()
+    on_quit is what the page's quit button does: by default it stops the
+    server; the window replaces it with quitting the whole app.
+    """
+
+    def __init__(self, port: int) -> None:
+        data_dir = _data_dir()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        log = data_dir / "obomoboe.log"
+        # A windowed build has nowhere to print to; on Windows it has no
+        # stdout at all.
+        sys.stdout = sys.stderr = open(log, "w", buffering=1, encoding="utf-8")
+
+        from werkzeug.serving import make_server
+
+        from src import create_app
+        from src.routes import SHUTDOWN_KEY
+
+        app = create_app()
+        self._server = make_server(HOST, port, app, threaded=True)
+        # Keep track of request threads so server_close() waits for them;
+        # otherwise the process can exit under the /quit request and the
+        # page saying it stopped never arrives.
+        self._server.daemon_threads = False
+        # Written once the port is ours, so the next launch looks here.
+        (data_dir / "port").write_text(str(port))
+        self.done = threading.Event()
+        self.on_quit = self.stop
+        app.extensions[SHUTDOWN_KEY] = lambda: threading.Thread(
+            target=self.on_quit, daemon=True).start()
+        print(f"obomoboe serving on {_url(port)} -- data in {data_dir}")
+
+    def run(self) -> None:
+        try:
+            self._server.serve_forever()
+        finally:
+            self._server.server_close()
+            self.done.set()
+
+    def stop(self) -> None:
+        if not self.done.is_set():
+            self._server.shutdown()
+
+
+def _start_server_thread(port: int) -> _Server:
+    server = _Server(port)
+    threading.Thread(target=server.run, name="obomoboe-server",
+                     daemon=True).start()
+    return server
 
 
 def _url(port: int) -> str:
@@ -155,21 +313,6 @@ def _free_port_after(port: int) -> int:
     _fail(f"Ports {port} to {port + PORTS_TO_TRY} are all in use, so obomoboe "
           "has nowhere to run.")
     raise AssertionError  # unreachable; _fail exits
-
-
-def _start_server(port: int) -> subprocess.Popen:
-    if getattr(sys, "frozen", False):
-        command = [sys.executable, "--serve", str(port)]
-    else:
-        command = [sys.executable, str(Path(__file__).resolve()), "--serve", str(port)]
-    options: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
-                     "stderr": subprocess.DEVNULL, "close_fds": True}
-    if sys.platform == "win32":
-        options["creationflags"] = (subprocess.DETACHED_PROCESS
-                                    | subprocess.CREATE_NEW_PROCESS_GROUP)
-    else:
-        options["start_new_session"] = True
-    return subprocess.Popen(command, **options)
 
 
 def _data_dir() -> Path:
