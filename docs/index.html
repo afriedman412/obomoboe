@@ -144,7 +144,10 @@
   .alt a { color: var(--accent); }
 
   .foot {
-    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 24px;
     padding-top: 16px;
     border-top: 1px solid var(--line);
     font-family: var(--stencil);
@@ -152,6 +155,7 @@
     letter-spacing: .04em;
     color: var(--muted);
   }
+  .foot p { margin: 0; }
   .foot a { color: var(--accent); }
 
   @media (prefers-reduced-motion: reduce) {
@@ -204,8 +208,11 @@
     </div>
   </section>
 
-  <p class="foot">Always the latest build. Free, and the source is on
-    <a href="https://github.com/afriedman412/obomoboe">GitHub</a>.</p>
+  <footer class="foot">
+    <p>Always the latest build. Free, and the source is on
+      <a href="https://github.com/afriedman412/obomoboe">GitHub</a>.</p>
+    <p>&copy; 2023&ndash;2026 <a href="https://dnpdata.com">DNP Data</a></p>
+  </footer>
 </main>
 </body>
 </html>
