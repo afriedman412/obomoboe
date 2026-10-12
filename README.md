@@ -1,9 +1,8 @@
 # obomoboe
 
-A read-it-later list that keeps its own copy. Save an article and it goes on
-a list you can sort, tag, search and mark as read, and the whole piece,
-images included, is kept on your computer, so you still have it after the
-original changes or disappears.
+Save articles to read later. obomoboe keeps a full copy of each one — text
+and images — on your computer, so it's still there when the original changes
+or disappears. Sort, tag and search your list, and mark things as read.
 
 ## Getting it
 
