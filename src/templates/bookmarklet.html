@@ -2,7 +2,7 @@
 {% block title %}bookmarklet &middot; obomoboe{% endblock %}
 
 {% block content %}
-<div class="reader">
+<div class="reader bookmarklet">
   <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; reading list</a></p>
   <h1>One-click saving</h1>
   {% if moved_from %}
@@ -11,22 +11,84 @@
       you added before still points at the old address &mdash; drag this one
       to your bookmarks bar in its place.</p>
   {% endif %}
-  <p>Drag this to your bookmarks bar. Clicking it on any page saves that page
-    to your list &mdash; sending the article <em>as your browser has it</em>,
-    already logged in and already past any bot check.</p>
-  <p>That is the difference between saving a Medium or subscriber-only piece
-    and saving the bot check that stands in front of it.</p>
-  <p style="color: var(--muted); font-size: 13.5px;">Click it on the article
-    itself &mdash; not on this page.</p>
-  <p style="margin: 24px 0;">
-    <a class="bookmarklet-drag" href="{{ code }}">Save to obomoboe</a>
-  </p>
-  <p style="color: var(--muted); font-size: 13.5px;">
-    It opens a small window at <code>{{ base }}/capture/window</code> and
-    hands the page to it, so it only works while this app is running. If
-    your browser asks about pop-ups from a site, allow them &mdash; a fetch
-    straight from the article's page is blocked by many sites' security
-    policy, and the window is the way around that.
-  </p>
+
+  <p>The bookmarklet is a button in your web browser's bookmarks bar. Click
+    it on any article and the page is saved to your list <em>as your browser
+    has it</em> &mdash; already logged in and already past any bot check, so
+    it works for subscriber-only pieces too.</p>
+
+  {# The one thing to do. Inside the app's window there is no bookmarks
+     bar, so the action there is to go to the browser; in a browser it is
+     the button itself. #}
+  <div class="install-cta app-window-only">
+    <a class="install-cta__button" href="{{ base }}/bookmarklet/install"
+       target="_blank" rel="noopener">Install in your browser &rarr;</a>
+    <p>Opens a page in your web browser with one button to drag into your
+      bookmarks bar.</p>
+  </div>
+
+  <div class="install-cta browser-only">
+    <p class="install-cta__lead">Drag this into your bookmarks bar:</p>
+    <a class="bookmarklet-drag install-cta__drag" href="{{ code }}"
+       title="Drag me to your bookmarks bar">Save to obomoboe</a>
+    <p>Then click it on any article to save it.</p>
+  </div>
+
+  <details class="by-hand">
+    <summary>Didn't work? Step by step</summary>
+
+    <ol class="steps">
+      <li>
+        <strong>Show your bookmarks bar.</strong>
+        <span>Chrome, Edge, Brave or Firefox: <kbd>&#8984;&#8679;B</kbd> on a
+          Mac, <kbd>Ctrl+Shift+B</kbd> on Windows. Safari: View &rarr; Show
+          Favorites Bar.</span>
+      </li>
+      <li>
+        <strong>Drag the button onto the bar.</strong>
+        <span>Use the <a href="{{ base }}/bookmarklet/install" target="_blank"
+          rel="noopener">install page</a> in your web browser &mdash; the
+          obomoboe window has no bookmarks bar to drag it to.</span>
+      </li>
+      <li>
+        <strong>Click it on an article.</strong>
+        <span>Wait for the page to finish loading, then click it. A small
+          window says <em>Saving&hellip;</em>, then <em>Saved</em>, and closes
+          itself. If your browser asks about pop-ups, allow them for that
+          site.</span>
+      </li>
+    </ol>
+
+    <p><strong>Still can't drag it?</strong> Make the bookmark by hand: copy
+      the code below, bookmark any page, then edit that bookmark &mdash; name
+      it <em>Save to obomoboe</em> and paste the code in as its address.</p>
+    <div class="code-copy">
+      <textarea id="bookmarklet-code" readonly rows="3"
+                spellcheck="false">{{ code }}</textarea>
+      <button type="button" id="copy-bookmarklet">copy</button>
+    </div>
+  </details>
+
+  <p class="hint">It only works while obomoboe is open, and it saves the page
+    it's clicked on &mdash; so click it on the article, not here. It talks to
+    obomoboe at <code>{{ base }}</code>.</p>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var button = document.getElementById("copy-bookmarklet");
+    var field = document.getElementById("bookmarklet-code");
+    if (!button || !field) return;
+    button.addEventListener("click", function () {
+      function selectIt() { field.focus(); field.select(); }
+      if (!navigator.clipboard) { selectIt(); return; }
+      navigator.clipboard.writeText(field.value).then(function () {
+        button.textContent = "copied";
+        setTimeout(function () { button.textContent = "copy"; }, 1600);
+      }, selectIt);
+    });
+  })();
+</script>
 {% endblock %}

@@ -26,6 +26,23 @@
 
   function row(el) { return el.closest(".article"); }
 
+  /* In the app's own window there is no address bar and no back button, so
+     a link off the site goes to the browser instead of stranding you
+     there. The window marks itself by setting window.pywebview. */
+  function markAppWindow() {
+    document.documentElement.classList.add("in-app-window");
+  }
+  if (window.pywebview) markAppWindow();
+  window.addEventListener("pywebviewready", markAppWindow);
+
+  document.addEventListener("click", function (event) {
+    if (!window.pywebview || event.defaultPrevented) return;
+    var link = event.target.closest("a[href]");
+    if (!link || link.target === "_blank") return;
+    if (!/^https?:$/.test(link.protocol) || link.origin === location.origin) return;
+    link.target = "_blank";
+  });
+
   document.addEventListener("click", function (event) {
     var trigger = event.target.closest("[data-action]");
     if (!trigger) return;

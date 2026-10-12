@@ -1,0 +1,5 @@
+# What the packaged desktop app needs on top of the server: the window it
+# shows the list in, and the tool that bundles it.
+-r requirements.txt
+pywebview>=6.2
+pyinstaller

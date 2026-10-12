@@ -771,6 +771,33 @@ class TestDesktopApp:
         assert "moved to http://localhost" in page
 
 
+class TestBookmarkletInstall:
+    def test_the_button_is_the_bookmarklet(self, client):
+        soup = BeautifulSoup(
+            client.get("/bookmarklet/install").get_data(as_text=True), "lxml")
+        button = soup.select_one("#drag-button")
+        assert button["href"].startswith("javascript:")
+        assert "http://localhost" in button["href"]
+        # Its text becomes the bookmark's name, so it must stay short.
+        assert button.get_text(strip=True) == "Save to obomoboe"
+        assert "bookmarks bar" in soup.find("h1").get_text()
+
+    def test_help_page_leads_with_the_action(self, client):
+        soup = BeautifulSoup(client.get("/bookmarklet").get_data(as_text=True), "lxml")
+        in_app = soup.select_one(".install-cta.app-window-only a")
+        assert in_app["href"].endswith("/bookmarklet/install")
+        assert soup.select_one(".install-cta.browser-only a")["href"] \
+            .startswith("javascript:")
+        # The steps are the fallback, folded away.
+        assert soup.select_one("details.by-hand .steps") is not None
+
+    def test_both_pages_carry_the_same_bookmarklet(self, client):
+        def code(path):
+            soup = BeautifulSoup(client.get(path).get_data(as_text=True), "lxml")
+            return soup.select_one('a[href^="javascript:"]')["href"]
+        assert code("/bookmarklet") == code("/bookmarklet/install")
+
+
 class TestReadTally:
     def test_settings_counts_what_you_have_read(self, client, conn):
         for n in range(3):

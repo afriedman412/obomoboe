@@ -548,15 +548,16 @@ def capture_window():
     return render_template("capture_window.html")
 
 
-@bp.route("/bookmarklet")
-def bookmarklet():
-    base = request.url_root.rstrip("/")
-    # Sends the page as your browser rendered it -- logged in, and past any
-    # bot check -- instead of asking the server to go and fetch it blind.
-    # The handover goes through /capture/window rather than a direct fetch;
-    # see capture_window() for why. The listener is registered before the
-    # window opens so the ready ping cannot slip past it.
-    code = (
+def _bookmarklet_code(base: str) -> str:
+    """The bookmarklet itself, pointed at this server.
+
+    Sends the page as your browser rendered it -- logged in, and past any
+    bot check -- instead of asking the server to go and fetch it blind. The
+    handover goes through /capture/window rather than a direct fetch; see
+    capture_window() for why. The listener is registered before the window
+    opens so the ready ping cannot slip past it.
+    """
+    return (
         "javascript:(function(){"
         "var b='" + base + "',done=false,w;"
         "function onMsg(e){"
@@ -575,6 +576,19 @@ def bookmarklet():
         "alert('obomoboe: no answer from '+b+' -- is it running?');},8000);"
         "})();"
     )
+
+
+@bp.route("/bookmarklet")
+def bookmarklet():
+    base = request.url_root.rstrip("/")
     moved_from = request.args.get("moved_from", type=int)
-    return render_template("bookmarklet.html", code=code, base=base,
-                           moved_from=moved_from)
+    return render_template("bookmarklet.html", code=_bookmarklet_code(base),
+                           base=base, moved_from=moved_from)
+
+
+@bp.route("/bookmarklet/install")
+def bookmarklet_install():
+    """Nothing but the button to drag, for the app to open in a browser."""
+    base = request.url_root.rstrip("/")
+    return render_template("bookmarklet_install.html",
+                           code=_bookmarklet_code(base))

@@ -20,7 +20,7 @@ endif
 # The double-clickable app: dist/obomoboe.app on macOS, dist/obomoboe/ on
 # Windows. Releases are built by .github/workflows/release.yml.
 app: install
-	. $(VENV_PATH); pip install --upgrade pyinstaller
+	. $(VENV_PATH); pip install --upgrade -r requirements-app.txt
 	${PYTHON} -m PyInstaller --noconfirm --clean obomoboe.spec
 
 .PHONY: test

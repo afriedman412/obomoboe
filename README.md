@@ -18,15 +18,19 @@ unzip it. There's nothing else to install.
   that suits you and open `obomoboe.exe` inside it. If SmartScreen says
   "Windows protected your PC", click **More info → Run anyway**.
 
-Opening the app opens obomoboe in your browser. It has no window of its own:
-to get back to it, open the app again or bookmark the page. To stop it, click
-**quit** at the top of the page.
+Opening the app opens obomoboe in a window of its own. Its **File** menu
+brings the window back and quits. On a Mac, closing the window keeps
+obomoboe running in the Dock (click the Dock icon to bring it back) and
+**Quit** stops it; on Windows, closing the window quits. Links to other sites
+open in your web browser.
 
 ## Saving articles
 
 - **Paste a link** into the box at the top of the list.
-- **Use the bookmarklet.** The **bookmarklet** page has a button to drag to
-  your bookmarks bar; click it on any article you're reading to save it. This
+- **Use the bookmarklet.** Choose **File → Set up the bookmarklet in your
+  browser…**: it opens a page in your web browser with a button to drag to
+  your bookmarks bar. Then click it on any article you're reading to save it,
+  while obomoboe is open. This
   saves the page as you see it, so it works for sites you're logged into and
   sites that turn automated requests away. Wait for the article to finish
   loading before you click, and if your browser asks about pop-ups, allow
@@ -98,5 +102,5 @@ that file.
 | `src/archiver.py` | saving copies to disk |
 | `src/tagging.py` | tag suggestions |
 | `src/config.py` | settings |
-| `launcher.py` | what the app runs: starts obomoboe and opens the browser |
+| `launcher.py` | what the app runs: starts obomoboe and shows its window |
 | `obomoboe.spec` | builds the app |

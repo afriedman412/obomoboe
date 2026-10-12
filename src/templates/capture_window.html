@@ -7,17 +7,101 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style id="theme-css">{{ theme.css | safe }}</style>
   <style>
-    body { margin: 0; padding: 22px 24px; background: var(--paper); color: var(--ink);
-           font-family: var(--serif); }
-    .capture-status { font-size: 17px; margin: 0 0 10px; }
-    .capture-status--error { color: var(--danger); }
-    .capture-detail { color: var(--muted); font-size: 13.5px; margin: 0;
-                      word-break: break-word; }
+    /* Sized for the 460x200 window the bookmarklet opens. */
+    body {
+      margin: 0;
+      padding: 0 22px 18px;
+      background: var(--paper);
+      color: var(--ink);
+      font: 15px/1.45 var(--serif);
+    }
+    .capture-bar {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding: 12px 0 8px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid var(--line-hard);
+      box-shadow: 0 2px 0 var(--highlight);
+    }
+    .capture-brand { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+    .capture-state {
+      font-family: var(--stencil);
+      font-size: 11px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .capture-body { display: flex; gap: 16px; align-items: flex-start; }
+
+    /* The stamp: a ring while it works, a filled seal once it is saved. */
+    .capture-stamp {
+      flex: none;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 3px solid var(--line);
+      border-top-color: var(--accent);
+      display: grid;
+      place-items: center;
+      font: 700 22px/1 var(--stencil);
+      color: var(--on-accent);
+      animation: capture-spin .9s linear infinite;
+    }
+    .is-saved .capture-stamp {
+      animation: none;
+      border-color: var(--line-hard);
+      background: var(--second-deep);
+      box-shadow: 2px 2px 0 var(--line-hard);
+    }
+    .is-saved .capture-stamp::before { content: "\2713"; }
+    .is-error .capture-stamp {
+      animation: none;
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    .is-error .capture-stamp::before { content: "!"; }
+    @keyframes capture-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .capture-stamp { animation: none; border-color: var(--accent); }
+    }
+
+    .capture-text { min-width: 0; }
+    .capture-status { font-size: 21px; font-weight: 700; line-height: 1.2; margin: 2px 0 4px; }
+    .is-error .capture-status { color: var(--danger); }
+    .capture-site {
+      font-family: var(--stencil);
+      font-size: 11.5px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--second-deep);
+      margin: 0;
+    }
+    .capture-detail {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 4px 0 0;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
   </style>
 </head>
-<body>
-  <p class="capture-status" id="status">Waiting for the page&hellip;</p>
-  <p class="capture-detail" id="detail"></p>
+<body class="is-waiting">
+  <header class="capture-bar">
+    <span class="capture-brand">obomoboe</span>
+    <span class="capture-state" id="state">waiting</span>
+  </header>
+  <div class="capture-body">
+    <span class="capture-stamp" aria-hidden="true"></span>
+    <div class="capture-text" role="status" aria-live="polite">
+      <p class="capture-status" id="status">Waiting for the page&hellip;</p>
+      <p class="capture-site" id="site"></p>
+      <p class="capture-detail" id="detail"></p>
+    </div>
+  </div>
   <script>
   // The bookmarklet cannot post to us from the article's page: sites like
   // nytimes.com send a Content-Security-Policy whose connect-src allows only
@@ -27,16 +111,25 @@
   // POST to /capture is same-origin and nothing stands in its way.
   (function () {
     var status = document.getElementById('status');
+    var site = document.getElementById('site');
     var detail = document.getElementById('detail');
-    function show(text, extra, isError) {
+    var state = document.getElementById('state');
+    // phase: waiting, saving, saved or error -- the stamp follows it.
+    function show(phase, text, extra, url) {
+      document.body.className = 'is-' + phase;
+      state.textContent = {waiting: 'waiting', saving: 'saving',
+                           saved: 'closing\u2026', error: 'not saved'}[phase];
       status.textContent = text;
-      status.className = 'capture-status' + (isError ? ' capture-status--error' : '');
+      site.textContent = url ? hostOf(url) : '';
       detail.textContent = extra || '';
     }
+    function hostOf(url) {
+      try { return new URL(url).hostname.replace(/^www\./, ''); }
+      catch (e) { return ''; }
+    }
     if (!window.opener) {
-      show('Nothing to save here.',
-           'The bookmarklet opens this window. Click it on the article you want to save.',
-           true);
+      show('error', 'Nothing to save here',
+           'The bookmarklet opens this window. Click it on the article you want to save.');
       return;
     }
     var received = false;
@@ -45,18 +138,18 @@
       var data = event.data || {};
       if (data.type !== 'obomoboe-capture') return;
       received = true;
-      show('Saving…', data.url);
+      show('saving', 'Saving\u2026', data.url, data.url);
       fetch('{{ url_for("main.capture") }}', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({url: data.url, html: data.html})
       }).then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.error) { show('obomoboe could not save this page.', d.error, true); return; }
-          show('Saved to obomoboe.', data.url);
-          setTimeout(function () { window.close(); }, 1200);
+          if (d.error) { show('error', 'Couldn\u2019t save this page', d.error, data.url); return; }
+          show('saved', 'Saved', data.url, data.url);
+          setTimeout(function () { window.close(); }, 1400);
         })
-        .catch(function (e) { show('obomoboe could not save this page.', String(e), true); });
+        .catch(function (e) { show('error', 'Couldn\u2019t save this page', String(e), data.url); });
     });
     // The opener has no way to know when this window is listening, so tell it.
     window.opener.postMessage({type: 'obomoboe-ready'}, '*');

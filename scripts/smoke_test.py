@@ -1,4 +1,5 @@
-"""Start a built app's server, check it answers, and quit it.
+"""Check a built app can open its window, then start its server, check it
+answers, and quit it.
 
     python scripts/smoke_test.py dist/obomoboe.app/Contents/MacOS/obomoboe
 
@@ -17,6 +18,10 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 
 def main(executable: str) -> None:
+    # The window cannot be opened on a build machine, but what it needs can
+    # be imported: a backend the build left out fails here.
+    subprocess.run([executable, "--check-window"], check=True, timeout=120)
+
     with tempfile.TemporaryDirectory() as data_dir:
         env = dict(os.environ, OBOMOBOE_DATA_DIR=data_dir)
         server = subprocess.Popen([executable, "--serve", str(PORT)], env=env)
