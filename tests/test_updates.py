@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 import pytest
 import requests
@@ -79,6 +80,8 @@ class TestChecking:
 
 
 class TestSwapScript:
+    # The swap is a shell script, and installing in place is Mac only.
+    @pytest.mark.skipif(sys.platform == "win32", reason="no /bin/sh")
     def test_new_app_replaces_the_old(self, tmp_path):
         bundle = tmp_path / "Applications" / "obomoboe.app"
         (bundle / "Contents").mkdir(parents=True)
