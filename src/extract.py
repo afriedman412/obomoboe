@@ -357,6 +357,12 @@ def extract(html: str, url: str, status_code: int = 200,
     # sees the page; see strip_chrome. Metadata is still read from the
     # untouched document.
     cleaned = strip_chrome(BeautifulSoup(html, "lxml"))
+    # Pictures are given full addresses here, against the page's <base> if
+    # it has one: trafilatura resolves them against `url`, which for an
+    # archive.today snapshot is the publisher's site rather than the
+    # archive's image host, and every picture came out a 404.
+    base = _page_base(soup, url)
+    _absolutize_images(cleaned, base)
     cleaned_html = str(cleaned)
 
     readable = trafilatura.extract(
@@ -440,8 +446,26 @@ def extract(html: str, url: str, status_code: int = 200,
                                               result.title)
     result.text = dedupe_head(result.text)
 
-    result.images = _image_urls(result.readable_html, url)
+    result.images = _image_urls(result.readable_html, base)
     return result
+
+
+def _page_base(soup: BeautifulSoup, url: str) -> str:
+    tag = soup.find("base", href=True)
+    if tag is not None and str(tag["href"]).strip():
+        return urljoin(url, str(tag["href"]).strip())
+    return url
+
+
+IMAGE_URL_ATTRS = ("src", "data-src", "data-lazy-src", "data-original")
+
+
+def _absolutize_images(soup: BeautifulSoup, base: str) -> None:
+    for img in soup.find_all("img"):
+        for attr in IMAGE_URL_ATTRS:
+            value = (img.get(attr) or "").strip()
+            if value and not value.lower().startswith("data:"):
+                img[attr] = urljoin(base, value)
 
 
 def _image_urls(fragment: str, base_url: str) -> list[str]:

@@ -10,19 +10,16 @@ Layout for each article:
 """
 from __future__ import annotations
 
-import hashlib
+import json
 import logging
-import mimetypes
 import queue
 import threading
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup
 
-from . import db, tagging
+from . import db, images, tagging
 from .extract import (Extracted, FetchError, dump_metadata, extract, fetch,
                       fetch_from_archive_ph, is_challenge_page,
                       looks_paywalled, strip_scripts)
@@ -269,63 +266,91 @@ def _write_snapshot(config: dict[str, Any], article_id: int,
     (target / "assets").mkdir(parents=True, exist_ok=True)
 
     readable = result.readable_html
-    if config["ARCHIVE_IMAGES"] and result.images:
-        readable = _localize_images(config, target, result, readable)
+    original = strip_scripts(result.html)
+    if config["ARCHIVE_IMAGES"]:
+        base = images.page_base(result.html, result.url)
+        cache = images.ImageCache(config, target, referer=result.url)
+        readable = images.localize(readable, base, cache, config["MAX_IMAGES"])
+        original = images.localize(original, base, cache,
+                                   config["MAX_ORIGINAL_IMAGES"],
+                                   fragment=False)
+    _mark_images_done(target)
 
-    (target / "original.html").write_text(strip_scripts(result.html),
-                                          encoding="utf-8")
+    (target / "original.html").write_text(original, encoding="utf-8")
     (target / "readable.html").write_text(readable, encoding="utf-8")
     (target / "article.txt").write_text(result.text, encoding="utf-8")
     (target / "meta.json").write_text(dump_metadata(result), encoding="utf-8")
     result.readable_html = readable
 
 
-def _localize_images(config: dict[str, Any], target: Path, result: Extracted,
-                     readable: str) -> str:
-    """Download images and rewrite srcs to point at the local copies."""
-    if not readable:
-        return readable
+# Left in assets/ once an article's pictures have been saved, so the fill-in
+# below knows which articles to leave alone.
+IMAGES_DONE = ".images-saved"
 
-    session = requests.Session()
-    headers = {"User-Agent": config["USER_AGENT"], "Referer": result.url}
-    limit = config["MAX_IMAGES"]
-    max_bytes = config["MAX_IMAGE_BYTES"]
-    saved: dict[str, str] = {}
 
-    for image_url in result.images[:limit]:
-        try:
-            resp = session.get(image_url, headers=headers, timeout=15,
-                               stream=True)
-            if resp.status_code >= 400:
-                continue
-            content_type = resp.headers.get("Content-Type", "").split(";")[0]
-            if not content_type.startswith("image/"):
-                continue
-            payload = b""
-            for chunk in resp.iter_content(64 * 1024):
-                payload += chunk
-                if len(payload) > max_bytes:
-                    payload = b""
-                    break
-            if not payload:
-                continue
-            suffix = (mimetypes.guess_extension(content_type)
-                      or Path(urlparse(image_url).path).suffix or ".img")
-            name = hashlib.sha256(image_url.encode()).hexdigest()[:16] + suffix
-            (target / "assets" / name).write_bytes(payload)
-            saved[image_url] = f"assets/{name}"
-        except requests.RequestException:
-            continue
+def _mark_images_done(target: Path) -> None:
+    (target / "assets").mkdir(parents=True, exist_ok=True)
+    (target / "assets" / IMAGES_DONE).touch()
 
-    if not saved:
-        return readable
 
-    soup = BeautifulSoup(readable, "lxml")
-    for img in soup.find_all("img"):
-        absolute = urljoin(result.url, (img.get("src") or "").strip())
-        if absolute in saved:
-            img["src"] = saved[absolute]
-    return soup.body.decode_contents() if soup.body else str(soup)
+def fill_in_images(config: dict[str, Any], article_id: int) -> bool:
+    """Save the pictures of an article archived before they were all kept.
+
+    Only the pictures: the text is not re-read, so nothing else about the
+    article changes. Returns whether there was anything to do.
+    """
+    target = article_dir(config, article_id)
+    readable_path = target / "readable.html"
+    if (target / "assets" / IMAGES_DONE).exists() or not readable_path.exists():
+        return False
+
+    original_path = target / "original.html"
+    original = (original_path.read_text(encoding="utf-8", errors="replace")
+                if original_path.exists() else "")
+    readable = readable_path.read_text(encoding="utf-8", errors="replace")
+    try:
+        url = json.loads((target / "meta.json").read_text())["url"]
+    except (OSError, ValueError, KeyError):
+        url = ""
+
+    base = images.page_base(original, url)
+    cache = images.ImageCache(config, target, referer=url)
+    new_readable = images.localize(readable, base, cache, config["MAX_IMAGES"])
+    new_original = images.localize(original, base, cache,
+                                   config["MAX_ORIGINAL_IMAGES"], fragment=False)
+    if new_readable != readable:
+        readable_path.write_text(new_readable, encoding="utf-8")
+    if original and new_original != original:
+        original_path.write_text(new_original, encoding="utf-8")
+    _mark_images_done(target)
+    return True
+
+
+def start_image_fill_in(config: dict[str, Any]) -> None:
+    """Fill in pictures for every article saved before, newest first, one
+    at a time in the background."""
+    if not config.get("ARCHIVE_IMAGES"):
+        return
+
+    def run() -> None:
+        root = Path(config["ARCHIVE_DIR"])
+        ids = sorted((int(d.name) for d in root.iterdir() if d.name.isdigit()),
+                     reverse=True) if root.exists() else []
+        for article_id in ids:
+            # Claimed like a re-archive, so the two never write at once.
+            with _inflight_lock:
+                if article_id in _inflight:
+                    continue
+                _inflight.add(article_id)
+            try:
+                fill_in_images(config, article_id)
+            except Exception:
+                log.exception("could not fill in pictures for %s", article_id)
+            finally:
+                with _inflight_lock:
+                    _inflight.discard(article_id)
+
+    threading.Thread(target=run, daemon=True, name="image-fill-in").start()
 
 
 # --------------------------------------------------------------------------

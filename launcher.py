@@ -121,6 +121,11 @@ def _run_window(port: int, start: str, server: Any) -> None:
     if server is not None:
         # The page's own quit button ends the app, not just the server.
         server.on_quit = quit_app
+        server.check_for_updates()
+
+    def check_for_updates() -> None:
+        window.show()
+        window.load_url(base + "updates?check=1")
 
     menu = [Menu("File", [
         MenuAction("Show obomoboe", show),
@@ -130,6 +135,8 @@ def _run_window(port: int, start: str, server: Any) -> None:
                    lambda: webbrowser.open(base + "bookmarklet/install")),
         MenuAction("Open this page in your browser",
                    lambda: webbrowser.open(window.get_current_url() or base)),
+        MenuSeparator(),
+        MenuAction("Check for updates\u2026", check_for_updates),
         MenuSeparator(),
         MenuAction("Quit obomoboe", quit_app),
     ])]
@@ -224,9 +231,13 @@ class _Server:
         from werkzeug.serving import make_server
 
         from src import create_app
-        from src.routes import SHUTDOWN_KEY
+        from src.routes import SHUTDOWN_KEY, UPDATES_KEY
 
         app = create_app()
+        self.app = app
+        # Installing an update ends with this copy quitting, the same way
+        # the page's quit button does.
+        app.extensions[UPDATES_KEY].quit_app = lambda: self.on_quit()
         self._server = make_server(HOST, port, app, threaded=True)
         # Keep track of request threads so server_close() waits for them;
         # otherwise the process can exit under the /quit request and the
@@ -246,6 +257,18 @@ class _Server:
         finally:
             self._server.server_close()
             self.done.set()
+
+    def check_for_updates(self) -> None:
+        """Ask GitHub about a newer version in the background, unless
+        that is switched off in settings."""
+        from src import db
+        from src.routes import UPDATES_KEY
+
+        with self.app.app_context():
+            settings = db.get_settings(db.get_db())
+            db.close_db()
+        if settings.get("CHECK_UPDATES", self.app.config["CHECK_UPDATES"]):
+            self.app.extensions[UPDATES_KEY].check_in_background()
 
     def stop(self) -> None:
         if not self.done.is_set():

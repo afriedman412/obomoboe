@@ -8,7 +8,7 @@ from typing import Any
 
 from flask import Flask
 
-from . import archiver, db
+from . import archiver, db, updates
 from .config import build_config
 
 
@@ -27,8 +27,10 @@ def create_app(overrides: dict[str, Any] | None = None) -> Flask:
 
     app.teardown_appcontext(db.close_db)
 
-    from .routes import bp
+    from .routes import UPDATES_KEY, bp
     app.register_blueprint(bp)
+    # The desktop launcher gives it a way to quit, which installing needs.
+    app.extensions[UPDATES_KEY] = updates.Updater()
 
     app.jinja_env.filters["humandate"] = _humandate
     app.jinja_env.filters["humantime"] = _humantime
@@ -40,6 +42,7 @@ def create_app(overrides: dict[str, Any] | None = None) -> Flask:
 
     if app.config.get("START_WORKERS", True):
         archiver.start_workers(app.config["ARCHIVE_WORKERS"])
+        archiver.start_image_fill_in(app.config)
 
     return app
 

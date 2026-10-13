@@ -28,10 +28,20 @@ app: install
 test:
 	@export FLASK_ENV=test && ${PYTHON} -m pytest tests/
 
-.PHONY: run
+.PHONY: run serve site
 
+# The app from source, in its own window, as the packaged app runs it.
+# Needs pywebview (requirements-app.txt); without it, it opens the browser.
 run:
+	${PYTHON} launcher.py
+
+# Just the server, with Flask's debugger, to use in a browser.
+serve:
 	${PYTHON} app.py
+
+# The download page in docs/, at http://localhost:8000.
+site:
+	cd docs && $(PYTHON_BIN) -m http.server 8000
 
 .PHONY: install
 
