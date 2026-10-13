@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}updates &middot; obomoboe{% endblock %}
+
+{% block content %}
+<div class="reader updates" id="updates"
+     data-status-url="{{ url_for('main.updates_status') }}"
+     data-install-url="{{ url_for('main.updates_install') }}">
+  <p class="crumbs"><a href="{{ url_for('main.index') }}">&larr; reading list</a></p>
+  <h1>Updates</h1>
+
+  {% if status.available %}
+    <div class="install-cta update-cta">
+      <p class="install-cta__lead">obomoboe {{ status.available }} is out.
+        You have {{ status.current }}.</p>
+      {% if can_install %}
+        <form method="post" action="{{ url_for('main.updates_install') }}"
+              id="install-form">
+          <button type="submit" class="install-cta__button">Update and
+            restart</button>
+        </form>
+        <p>Downloads the new version, checks it's the genuine article, and
+          reopens obomoboe. Your articles and settings stay as they are.</p>
+      {% else %}
+        <a class="install-cta__button" href="{{ download_url }}">Download
+          {{ status.available }}</a>
+        <p>{{ blocker }}</p>
+      {% endif %}
+      <p class="update-progress" id="update-progress" role="status"
+         aria-live="polite"
+         {% if status.phase not in ('downloading', 'installing', 'failed') %}hidden{% endif %}
+         >{% if status.phase == 'failed' %}Couldn't update: {{ status.detail }}{% endif %}</p>
+      {% if release %}
+        <p><a href="{{ release.url }}">What's new in {{ release.version }}</a></p>
+      {% endif %}
+    </div>
+  {% elif status.error and not status.latest %}
+    <p class="notice">Couldn't check for updates &mdash; obomoboe couldn't
+      reach GitHub. Check your connection and try again.</p>
+  {% elif status.latest %}
+    <p class="update-current">You have the latest version,
+      <strong>{{ status.current }}</strong>.</p>
+  {% endif %}
+
+  <p class="hint"><a href="{{ url_for('main.updates_page', check=1) }}">Check
+    again</a> &middot; This is obomoboe {{ status.current }}.</p>
+</div>
+{% endblock %}

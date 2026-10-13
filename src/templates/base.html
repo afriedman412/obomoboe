@@ -22,6 +22,14 @@
     </nav>
   </header>
 
+  {# Filled in by app.js too, when the launch check lands after the page. #}
+  <p class="update-banner" id="update-banner"
+     {% if not update_available or request.endpoint == 'main.updates_page' %}hidden{% endif %}>
+    <span>obomoboe <strong data-role="update-version">{{ update_available or '' }}</strong>
+      is out.</span>
+    <a href="{{ url_for('main.updates_page') }}">Update</a>
+  </p>
+
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <ul class="flashes">

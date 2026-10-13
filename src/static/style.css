@@ -66,17 +66,22 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   box-shadow: 0 3px 0 var(--highlight);
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-family: var(--serif);
   font-weight: 700;
   font-size: 23px;
   letter-spacing: -.01em;
   color: var(--ink);
 }
+/* The app icon, made by scripts/make_icons.py. */
 .brand::before {
-  content: "❦";
-  color: var(--accent);
-  margin-right: 8px;
-  font-size: 18px;
+  content: "";
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: url("icon.png") center / contain no-repeat;
 }
 .brand:hover { text-decoration: none; color: var(--accent); }
 .topbar nav { display: flex; gap: 16px; }
@@ -102,6 +107,31 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   margin-bottom: 8px;
 }
 .flash--error { background: var(--warn-soft); border-left-color: var(--danger); }
+
+/* A newer version is out. Sits under the masthead on every page. */
+.update-banner {
+  max-width: 900px;
+  margin: 14px auto 0;
+  padding: 8px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  border: 1.5px solid var(--line-hard);
+  border-left: 6px solid var(--second);
+  background: var(--highlight-soft);
+  font-family: var(--stencil);
+  font-size: 13px;
+  letter-spacing: .03em;
+}
+.update-banner[hidden] { display: none; }
+.update-banner a { font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+@media (max-width: 939px) { .update-banner { margin-inline: 20px; } }
+
+.update-cta { display: grid; justify-items: start; gap: 12px; }
+.update-progress { color: var(--ink) !important; font-family: var(--stencil); font-size: 13px; }
+.update-current { font-size: 17px; }
 
 /* ---------- add form ---------- */
 

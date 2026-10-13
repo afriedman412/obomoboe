@@ -346,9 +346,11 @@ SETTING_KEYS = ("ANTHROPIC_API_KEY", "LLM_TAGS_ENABLED", "TAG_MODE",
                 "TAG_MODEL", "TAG_SUGGESTIONS",
                 # Colorway: a preset and light/dark/auto. src/theme.py
                 # checks both.
-                "THEME", "THEME_MODE")
+                "THEME", "THEME_MODE",
+                # Whether the app asks GitHub for a newer version on launch.
+                "CHECK_UPDATES")
 
-BOOL_SETTINGS = ("LLM_TAGS_ENABLED",)
+BOOL_SETTINGS = ("LLM_TAGS_ENABLED", "CHECK_UPDATES")
 INT_SETTINGS = ("TAG_SUGGESTIONS",)
 
 # What to do with the tags an article suggests.

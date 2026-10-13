@@ -325,6 +325,70 @@
     });
   }
 
+  /* The launch-time update check runs alongside the first page load and
+     can land after it, so look once more a few seconds in. */
+  var banner = document.getElementById("update-banner");
+  if (banner && banner.hidden && !document.getElementById("updates")) {
+    setTimeout(function () {
+      fetch("/updates/status", { headers: { "X-Requested-With": "XMLHttpRequest" } })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          if (!data.available) return;
+          banner.querySelector('[data-role="update-version"]').textContent = data.available;
+          banner.hidden = false;
+        })
+        .catch(function () {});
+    }, 4000);
+  }
+
+  /* Updating: start it, then follow it until obomoboe restarts. */
+  var updatesPage = document.getElementById("updates");
+  var installForm = document.getElementById("install-form");
+  if (updatesPage && installForm) {
+    var progress = document.getElementById("update-progress");
+    var installButton = installForm.querySelector("button");
+    var MESSAGES = {
+      downloading: "Downloading the new version\u2026",
+      installing: "Installing \u2014 obomoboe will close and reopen in a moment."
+    };
+
+    function say(text) { progress.textContent = text; progress.hidden = false; }
+
+    function follow() {
+      fetch(updatesPage.dataset.statusUrl,
+            { headers: { "X-Requested-With": "XMLHttpRequest" } })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          if (data.phase === "failed") {
+            say("Couldn\u2019t update: " + data.detail);
+            installButton.disabled = false;
+            return;
+          }
+          if (MESSAGES[data.phase]) say(MESSAGES[data.phase]);
+          setTimeout(follow, 1000);
+        })
+        /* Gone quiet: this copy has quit to make way for the new one. */
+        .catch(function () { say(MESSAGES.installing); });
+    }
+
+    installForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      installButton.disabled = true;
+      say(MESSAGES.downloading);
+      post(updatesPage.dataset.installUrl, {})
+        .then(function (data) {
+          if (!data.started && data.phase !== "downloading"
+              && data.phase !== "installing") {
+            say("Couldn\u2019t start the update" + (data.detail ? ": " + data.detail : "."));
+            installButton.disabled = false;
+            return;
+          }
+          follow();
+        })
+        .catch(function () { installButton.disabled = false; });
+    });
+  }
+
   /* Theme settings: redraw the page in whatever is picked, before saving.
      The CSS mirrors theme.css() on the server. */
   var themeForm = document.getElementById("theme");

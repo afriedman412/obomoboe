@@ -108,6 +108,22 @@
       </p>
     </section>
 
+    <section>
+      <h2>Updates</h2>
+      <p class="hint">This is obomoboe {{ app_version }}.
+        <a href="{{ url_for('main.updates_page', check=1) }}">Check for
+        updates</a></p>
+      <label class="row">
+        <input type="checkbox" name="check_updates"
+               {{ 'checked' if config.CHECK_UPDATES }}>
+        <span>
+          <strong>Check for updates when obomoboe opens</strong>
+          <em>Asks GitHub for the latest version number. Nothing about your
+            articles is sent.</em>
+        </span>
+      </label>
+    </section>
+
     <button type="submit" class="primary">Save settings</button>
   </form>
 

@@ -53,6 +53,9 @@ def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         # Snapshot images alongside the text so the archive survives link rot.
         "ARCHIVE_IMAGES": _env_bool("OBOMOBOE_ARCHIVE_IMAGES", True),
         "MAX_IMAGES": _env_int("OBOMOBOE_MAX_IMAGES", 25),
+        # The saved original page carries far more pictures than the reading
+        # view -- logos, avatars, thumbnails -- so it is capped separately.
+        "MAX_ORIGINAL_IMAGES": _env_int("OBOMOBOE_MAX_ORIGINAL_IMAGES", 60),
         "MAX_IMAGE_BYTES": _env_int("OBOMOBOE_MAX_IMAGE_BYTES", 5_000_000),
         # Below this word count a "successful" fetch is treated as a paywall stub.
         "MIN_WORDS": _env_int("OBOMOBOE_MIN_WORDS", 200),
@@ -71,6 +74,8 @@ def build_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
         # off | suggest | apply -- see db.TAG_MODES.
         "TAG_MODE": os.environ.get("OBOMOBOE_TAG_MODE", "suggest"),
         "LLM_TAGS_ENABLED": _env_bool("OBOMOBOE_LLM_TAGS", True),
+        # Ask GitHub for a newer release when the app opens.
+        "CHECK_UPDATES": _env_bool("OBOMOBOE_CHECK_UPDATES", True),
         "TAG_MODEL": os.environ.get("OBOMOBOE_TAG_MODEL", "claude-opus-5"),
         "LLM_TAG_CHARS": _env_int("OBOMOBOE_LLM_TAG_CHARS", 6000),
         # Read from the environment if it is there; the settings page can set

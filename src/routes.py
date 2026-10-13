@@ -11,7 +11,8 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
                    render_template, request, send_from_directory, url_for)
 from markupsafe import Markup
 
-from . import archiver, db, tagging, theme
+from . import archiver, db, tagging, theme, updates
+from .version import __version__
 from .extract import archive_ph_submit_url, normalize_url, snapshot_urls
 
 bp = Blueprint("main", __name__)
@@ -49,6 +50,30 @@ def _quit_available() -> dict:
     return {"can_quit": SHUTDOWN_KEY in current_app.extensions}
 
 
+UPDATES_KEY = "obomoboe.updates"
+
+
+def _updater() -> "updates.Updater":
+    return current_app.extensions[UPDATES_KEY]
+
+
+@bp.app_context_processor
+def _update_banner() -> dict:
+    """What a page needs to say a newer version is out. Never checks on its
+    own: the launcher does that once, in the background."""
+    updater = current_app.extensions.get(UPDATES_KEY)
+    available = updater.available if updater else None
+    return {"app_version": __version__,
+            "update_available": available.version if available else None}
+
+
+def _same_origin() -> bool:
+    """Whether a POST came from obomoboe's own pages. /capture lets any page
+    post to this server, so actions that matter check."""
+    origin = request.headers.get("Origin")
+    return not origin or urlparse(origin).netloc == urlparse(request.url_root).netloc
+
+
 @bp.app_context_processor
 def _theme() -> dict:
     try:
@@ -76,10 +101,8 @@ def quit_app():
     shutdown = current_app.extensions.get(SHUTDOWN_KEY)
     if shutdown is None:
         abort(404)
-    # /capture lets any page post to this server, so check this one came
-    # from our own pages; otherwise any site you visit could switch it off.
-    origin = request.headers.get("Origin")
-    if origin and urlparse(origin).netloc != urlparse(request.url_root).netloc:
+    # Otherwise any site you visit could switch it off.
+    if not _same_origin():
         abort(403)
     shutdown()
     return render_template("quit.html", can_quit=False)
@@ -442,6 +465,7 @@ def settings():
         stored = db.get_settings(conn)
         values: dict = {
             "LLM_TAGS_ENABLED": bool(request.form.get("llm_tags")),
+            "CHECK_UPDATES": bool(request.form.get("check_updates")),
             "TAG_MODEL": ((request.form.get("tag_model") or "").strip()
                           or "claude-opus-5"),
         }
@@ -592,3 +616,36 @@ def bookmarklet_install():
     base = request.url_root.rstrip("/")
     return render_template("bookmarklet_install.html",
                            code=_bookmarklet_code(base))
+
+
+@bp.route("/updates")
+def updates_page():
+    updater = _updater()
+    # File > Check for updates asks for a fresh answer; otherwise the one
+    # from launch (or the last check) will do.
+    if request.args.get("check") or not updater.checked_at:
+        updater.check(force=bool(request.args.get("check")))
+    blocker = updates.install_blocker()
+    return render_template(
+        "updates.html",
+        status=updater.status(),
+        release=updater.latest,
+        download_url=updater.download_url(),
+        can_install=blocker is None,
+        blocker=updates.BLOCKER_MESSAGES.get(blocker or "", ""),
+    )
+
+
+@bp.get("/updates/status")
+def updates_status():
+    return jsonify(_updater().status())
+
+
+@bp.post("/updates/install")
+def updates_install():
+    if not _same_origin():
+        abort(403)
+    started = _updater().start_install()
+    if _wants_json():
+        return jsonify({"started": started, **_updater().status()})
+    return redirect(url_for("main.updates_page"))

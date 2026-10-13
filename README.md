@@ -81,7 +81,9 @@ network: it has no login.
 
 ```sh
 make install     # creates venv/, installs requirements.txt
-make run         # http://127.0.0.1:5001
+make run         # the app, in its own window (needs requirements-app.txt)
+make serve       # just the server, for a browser: http://127.0.0.1:5001
+make site        # the download page: http://localhost:8000
 make test
 make app         # builds the double-clickable app into dist/
 ```

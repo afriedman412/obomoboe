@@ -22,6 +22,11 @@ for package in ("trafilatura", "justext", "courlan", "htmldate", "tld",
 # the machine that built it but gets stopped by Gatekeeper anywhere else.
 codesign_identity = os.environ.get("OBOMOBOE_CODESIGN_IDENTITY") or None
 
+# One version number, in src/version.py; the app reads it at runtime too.
+_ns: dict = {}
+exec(open(os.path.join(SPECPATH, "src", "version.py")).read(), _ns)
+version = _ns["__version__"]
+
 # pywebview picks its platform backend at runtime, so name it here.
 if sys.platform == "darwin":
     window_imports = ["webview.platforms.cocoa"]
@@ -49,6 +54,8 @@ exe = EXE(
     name="obomoboe",
     # No terminal window: the app shows its own window instead.
     console=False,
+    # Made from icons/source.png by scripts/make_icons.py.
+    icon=os.path.join(SPECPATH, "icons", "obomoboe.ico"),
     upx=False,
     codesign_identity=codesign_identity,
 )
@@ -59,10 +66,11 @@ if sys.platform == "darwin":
         coll,
         name="obomoboe.app",
         bundle_identifier="com.obomoboe.app",
+        icon=os.path.join(SPECPATH, "icons", "obomoboe.icns"),
         codesign_identity=codesign_identity,
         info_plist={
             "CFBundleDisplayName": "obomoboe",
-            "CFBundleShortVersionString": "1.2.0",
+            "CFBundleShortVersionString": version,
             "NSHighResolutionCapable": True,
         },
     )

@@ -615,3 +615,14 @@ class TestSnapshotFormatting:
                               "Arrangement.</div></h2>")
         heading = strip_chrome(BeautifulSoup(page, "lxml")).find("h2")
         assert heading.find("p") is None
+
+    def test_snapshot_pictures_resolve_against_the_archive(self):
+        """A snapshot names its image host in <base>; trafilatura resolved
+        against the publisher's address and every picture 404'd."""
+        page = self._snapshot("<div><img src='/29TnY/abc.png' alt='a picture'"
+                              " width='600' height='400'></div>")
+        page = page.replace("<html>", "<html><head><base href='//img.archive.ph'>"
+                                      "</head>")
+        result = extract(page, "https://slate.com/life/a.html")
+        assert "https://img.archive.ph/29TnY/abc.png" in result.readable_html
+        assert "slate.com/29TnY" not in result.readable_html

@@ -7,13 +7,23 @@ Run by the release workflow on each platform before anything is uploaded.
 """
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
 
-PORT = 5099
+
+def _free_port() -> int:
+    # Whatever happens to be free, so the check never trips over something
+    # else running on the machine.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+PORT = _free_port()
 BASE = f"http://127.0.0.1:{PORT}"
 
 

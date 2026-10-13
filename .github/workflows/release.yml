@@ -51,6 +51,19 @@ jobs:
       - name: Test
         run: python -m pytest tests/ -q
 
+      # The app reports src/version.py as its version, so a tag that says
+      # something else would ship an app that keeps offering itself as an
+      # update.
+      - name: Check the tag matches the version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version="$(python -c 'from src.version import __version__; print(__version__)')"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match src/version.py (${version})"
+            exit 1
+          fi
+
       - name: Require signing for releases (macOS)
         if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v') && env.MACOS_CERTIFICATE_P12 == ''
         run: |
