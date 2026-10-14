@@ -135,16 +135,23 @@ jobs:
             echo "::error::notarization was not accepted"
             exit 1
           fi
-          # Stapling fetches the ticket Apple just issued, and that request
-          # has dropped mid-way ("network connection was lost") on two
-          # releases running. Try again before giving up.
+          # Stapling fetches the ticket Apple just issued and tucks it into
+          # the app, so it can be checked offline. Some runners can't reach
+          # the ticket server at all ("network connection was lost", five
+          # times running on v1.4.0's Intel build). The app is notarized
+          # either way -- unstapled, macOS asks Apple online the first time
+          # it opens -- so a failed staple is a warning, not a failed
+          # release.
+          stapled=no
           for attempt in 1 2 3 4 5; do
-            xcrun stapler staple dist/obomoboe.app && break
-            [ "$attempt" = 5 ] && exit 1
-            echo "stapling failed (attempt $attempt), retrying in 20s"
-            sleep 20
+            if xcrun stapler staple dist/obomoboe.app; then stapled=yes; break; fi
+            [ "$attempt" = 5 ] || { echo "stapling failed (attempt $attempt), retrying in 20s"; sleep 20; }
           done
-          spctl --assess --type execute --verbose dist/obomoboe.app
+          if [ "$stapled" = yes ]; then
+            spctl --assess --type execute --verbose dist/obomoboe.app
+          else
+            echo "::warning::notarized, but the ticket could not be stapled; macOS will check with Apple online on first launch"
+          fi
 
       # ditto rather than zip: it keeps the symlinks inside the app bundle,
       # which macOS needs for the bundle to open.
