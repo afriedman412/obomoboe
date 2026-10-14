@@ -626,3 +626,59 @@ class TestSnapshotFormatting:
         result = extract(page, "https://slate.com/life/a.html")
         assert "https://img.archive.ph/29TnY/abc.png" in result.readable_html
         assert "slate.com/29TnY" not in result.readable_html
+
+
+class TestCompleteness:
+    @staticmethod
+    def _soup(html):
+        return BeautifulSoup(html, "lxml")
+
+    def test_declared_length_from_json_ld(self):
+        from src.extract import declared_word_count
+        html = ('<script type="application/ld+json">{"@graph": [{"@type": '
+                '"NewsArticle", "wordCount": "2542"}]}</script>')
+        assert declared_word_count(self._soup(html), html) == 2542
+
+    def test_declared_length_from_the_page_data(self):
+        """The NYT keeps it in its own preloaded data, not JSON-LD."""
+        from src.extract import declared_word_count
+        html = '<script>window.__preloadedData = {"wordCount":1012,"x":1}</script>'
+        assert declared_word_count(self._soup(html), html) == 1012
+
+    def test_several_lengths_mean_none(self):
+        from src.extract import declared_word_count
+        html = '<script>{"wordCount": 900} {"wordCount": 4100}</script>'
+        assert declared_word_count(self._soup(html), html) is None
+
+    def test_free_flag(self):
+        from src.extract import accessible_for_free
+
+        def flag(value):
+            return accessible_for_free(self._soup(
+                f'<script type="application/ld+json">{{"isAccessibleForFree": '
+                f'{value}}}</script>'))
+        assert flag("false") is False
+        assert flag('"False"') is False
+        assert flag("true") is True
+        assert accessible_for_free(self._soup("<p>nothing</p>")) is None
+
+    def _result(self, words, expected=None, free=None, tail=""):
+        from src.extract import Extracted
+        text = " ".join(["word"] * words) + " " + tail
+        return Extracted(url="https://e.example/", text=text,
+                         expected_words=expected, free=free)
+
+    def test_verdicts(self):
+        from src.extract import looks_incomplete
+        assert "only 14 of about 1587" in looks_incomplete(self._result(14, 1587))
+        assert "only 150 words" in looks_incomplete(self._result(150))
+        assert looks_incomplete(self._result(1049, 1012)) is None
+        # A whole article whose footer offers a log-in is still whole...
+        assert looks_incomplete(self._result(
+            3018, 2985, free=False, tail="Already a subscriber?")) is None
+        # ...and on a free page the same words are a footer, not a paywall.
+        assert looks_incomplete(self._result(
+            900, tail="Already a subscriber?")) is None
+        assert looks_incomplete(self._result(
+            900, free=False, tail="Already a subscriber?")) == \
+            "the text stops at a paywall"

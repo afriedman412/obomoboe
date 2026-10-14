@@ -61,6 +61,27 @@
       color: var(--danger);
     }
     .is-error .capture-stamp::before { content: "!"; }
+    /* Saved, but only part of the article: amber, and it stays open. */
+    .is-warn .capture-stamp {
+      animation: none;
+      border-color: var(--warn);
+      color: var(--warn);
+    }
+    .is-warn .capture-stamp::before { content: "!"; }
+    .is-warn .capture-status { color: var(--warn); }
+    .capture-close {
+      margin-top: 8px;
+      font: 12px var(--stencil);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border: 1.5px solid var(--line-hard);
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: var(--ink);
+      cursor: pointer;
+    }
+    .capture-close[hidden] { display: none; }
     @keyframes capture-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) {
       .capture-stamp { animation: none; border-color: var(--accent); }
@@ -100,6 +121,7 @@
       <p class="capture-status" id="status">Waiting for the page&hellip;</p>
       <p class="capture-site" id="site"></p>
       <p class="capture-detail" id="detail"></p>
+      <button type="button" class="capture-close" id="close" hidden>close</button>
     </div>
   </div>
   <script>
@@ -114,19 +136,62 @@
     var site = document.getElementById('site');
     var detail = document.getElementById('detail');
     var state = document.getElementById('state');
-    // phase: waiting, saving, saved or error -- the stamp follows it.
+    var closeButton = document.getElementById('close');
+    closeButton.addEventListener('click', function () { window.close(); });
+    // phase: waiting, saving, saved, warn or error -- the stamp follows it.
     function show(phase, text, extra, url) {
       document.body.className = 'is-' + phase;
       state.textContent = {waiting: 'waiting', saving: 'saving',
-                           saved: 'closing\u2026', error: 'not saved'}[phase];
+                           saved: 'closing\u2026', warn: 'incomplete',
+                           error: 'not saved'}[phase];
       status.textContent = text;
       site.textContent = url ? hostOf(url) : '';
       detail.textContent = extra || '';
+      // What needs reading stays up until it's dismissed.
+      closeButton.hidden = !(phase === 'warn' || phase === 'error');
     }
     function hostOf(url) {
       try { return new URL(url).hostname.replace(/^www\./, ''); }
       catch (e) { return ''; }
     }
+    function closeSoon(ms) { setTimeout(function () { window.close(); }, ms); }
+
+    // Handing the page over is quick; reading it -- and, if it looks cut
+    // off, looking for a fuller copy on archive.today -- takes longer. Wait
+    // for the answer, so a fragment is reported here and not discovered on
+    // the day you sit down to read it.
+    function follow(id, url, started) {
+      var waited = Date.now() - started;
+      if (waited > 6000) show('saving', 'Still working\u2026',
+                              'Checking for a fuller copy of the article.', url);
+      if (waited > 75000) {
+        show('saved', 'Saved', 'Still reading it \u2014 check the list in a moment.', url);
+        closeSoon(2500);
+        return;
+      }
+      fetch('{{ url_for("main.api_articles") }}?ids=' + id)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var a = (d.articles || [])[0];
+          if (!a || a.archive_status === 'pending') {
+            setTimeout(function () { follow(id, url, started); }, 1000);
+            return;
+          }
+          if (a.archive_status === 'failed') {
+            show('error', 'Couldn\u2019t read this page', a.archive_error, url);
+          } else if (a.incomplete) {
+            show('warn', 'Only part of it came through', a.archive_error, url);
+          } else if (a.archive_source === 'archive.today') {
+            show('saved', 'Saved', 'From archive.today \u2014 the page here was cut off.', url);
+            closeSoon(3500);
+          } else {
+            show('saved', 'Saved', url, url);
+            closeSoon(1400);
+          }
+        })
+        .catch(function () { setTimeout(function () { follow(id, url, started); }, 1500); });
+    }
+
     if (!window.opener) {
       show('error', 'Nothing to save here',
            'The bookmarklet opens this window. Click it on the article you want to save.');
@@ -146,8 +211,8 @@
       }).then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.error) { show('error', 'Couldn\u2019t save this page', d.error, data.url); return; }
-          show('saved', 'Saved', data.url, data.url);
-          setTimeout(function () { window.close(); }, 1400);
+          show('saving', 'Reading the article\u2026', data.url, data.url);
+          follow(d.id, data.url, Date.now());
         })
         .catch(function (e) { show('error', 'Couldn\u2019t save this page', String(e), data.url); });
     });

@@ -224,6 +224,18 @@
           }
           var title = item.querySelector(".title");
           if (title && article.title) title.textContent = article.title;
+          if (article.incomplete && !item.querySelector('[data-role="incomplete"]')) {
+            var warning = document.createElement("form");
+            warning.className = "incomplete";
+            warning.dataset.role = "incomplete";
+            warning.method = "post";
+            warning.action = "/a/" + article.id + "/rearchive";
+            warning.innerHTML = "<span>Only part of this article came through.</span>"
+              + '<input type="hidden" name="source" value="archive.ph">'
+              + '<button type="submit">try archive.today</button>';
+            var meta = item.querySelector(".meta");
+            if (meta) meta.after(warning);
+          }
         });
         pollTimer = stillWaiting ? setTimeout(poll, 2500) : null;
       })
