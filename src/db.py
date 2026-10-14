@@ -90,6 +90,8 @@ ADDED_COLUMNS = (
     ("articles", "suggested_tags", "TEXT NOT NULL DEFAULT ''"),
     # The archive.today snapshot an article was read from, when it was.
     ("articles", "archive_url", "TEXT"),
+    # 1 when the saved copy looks like only part of the article.
+    ("articles", "incomplete", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

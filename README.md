@@ -40,10 +40,13 @@ its images. Search covers the whole text, not just titles. Saving the same
 article twice, even from slightly different links, finds the one you
 already have.
 
-When a link only returns a paywall or a stub, obomoboe tries a copy from
-archive.today instead. That doesn't always work; when it doesn't, the
-article is marked as partial and its page has a link for making the snapshot
-yourself, after which **re-archive** picks it up.
+Every save is checked for being the whole article -- against the length the
+page says it is, where it says. When only part came through (a paywall, or
+a page saved before it finished loading), obomoboe tries a copy from
+archive.today and keeps whichever is fuller. When that doesn't work either,
+the save window says so, and the article is marked **Only part of this
+article came through** in the list, with a button to try archive.today
+again and a link for making the snapshot yourself.
 
 ## Tags
 

@@ -22,7 +22,7 @@ import requests
 from . import db, images, tagging
 from .extract import (Extracted, FetchError, dump_metadata, extract, fetch,
                       fetch_from_archive_ph, is_challenge_page,
-                      looks_paywalled, strip_scripts)
+                      looks_incomplete, looks_paywalled, strip_scripts)
 
 log = logging.getLogger(__name__)
 
@@ -111,6 +111,9 @@ def archive_article(config: dict[str, Any], article_id: int,
             archive_source=result.source,
             archive_error=note,
             archived_at=db.utcnow(),
+            # Judged on the copy kept, whichever source it came from.
+            incomplete=int(looks_incomplete(result, config["MIN_WORDS"])
+                           is not None),
             **_source_urls(row, result),
         )
         db.index_article(conn, article_id, result.title or url, result.text)
@@ -213,7 +216,24 @@ def _retrieve(config: dict[str, Any], url: str, force_archive_ph: bool,
         captured = extract(html, url, 200, source="browser")
         if not captured.text.strip():
             return None, "captured page had no readable text"
-        return captured, None
+        # A page saved before it finished loading, or by someone without a
+        # subscription, is a fragment. When it looks like one -- or says
+        # it's paywalled without saying how long it is -- see whether
+        # archive.today has more. A subscriber's whole copy is kept: the
+        # snapshot has to be clearly longer to replace it.
+        why = looks_incomplete(captured, config["MIN_WORDS"])
+        unsure = why is None and captured.free is False \
+            and not captured.expected_words
+        error = None
+        if (why or unsure) and config["ARCHIVE_PH_ENABLED"]:
+            archived, error = _from_archive_today(config, lookup_url)
+            if archived is not None and \
+                    archived.word_count > captured.word_count * BETTER_BY:
+                return archived, ("used archive.today -- the page you saved "
+                                  + (f"was cut off ({why})" if why
+                                     else "was behind a paywall"))
+            error = error or "archive.today had no better copy"
+        return captured, _note(why, error) if why else None
 
     session = requests.Session()
     user_agent = config["USER_AGENT"]
@@ -240,24 +260,38 @@ def _retrieve(config: dict[str, Any], url: str, force_archive_ph: bool,
     if not config["ARCHIVE_PH_ENABLED"]:
         return direct, direct_error
 
+    archived, error = _from_archive_today(config, lookup_url, session)
+    if archived is None:
+        note = _note(direct_error, error)
+        return (direct, note) if direct is not None else (None, note)
+    # Only prefer the snapshot if it actually gave us more to read.
+    if direct is None or archived.word_count > direct.word_count:
+        note = f"used archive.today ({direct_error})" if direct_error else None
+        return archived, note
+    return direct, _note(direct_error, "archive.today had no better copy")
+
+
+# A snapshot replaces a page saved from the browser only when it is this
+# much longer: a subscriber's whole copy and archive.today's whole copy
+# differ by a few words, and the browser's is the one to keep.
+BETTER_BY = 1.15
+
+
+def _from_archive_today(config: dict[str, Any], lookup_url: str,
+                        session: requests.Session | None = None
+                        ) -> tuple[Extracted | None, str | None]:
+    """archive.today's newest snapshot of the page, extracted, or why not."""
     try:
         html, status, final_url = fetch_from_archive_ph(
-            lookup_url, user_agent, config["ARCHIVE_PH_HOSTS"], timeout, session
-        )
-        archived = extract(html, lookup_url, status, source="archive.today")
-        archived.url = lookup_url
-        archived.original_url = archived.original_url or lookup_url
-        archived.archive_url = archived.archive_url or final_url
-        # Only prefer the snapshot if it actually gave us more to read.
-        if direct is None or archived.word_count > direct.word_count:
-            note = f"used archive.today ({direct_error})" if direct_error else None
-            return archived, note
-        return direct, _note(direct_error, "archive.today had no better copy")
+            lookup_url, config["USER_AGENT"], config["ARCHIVE_PH_HOSTS"],
+            config["FETCH_TIMEOUT"], session)
     except FetchError as exc:
-        note = _note(direct_error, f"archive.today unavailable ({exc})")
-        if direct is not None:
-            return direct, note
-        return None, note
+        return None, f"archive.today unavailable ({exc})"
+    archived = extract(html, lookup_url, status, source="archive.today")
+    archived.url = lookup_url
+    archived.original_url = archived.original_url or lookup_url
+    archived.archive_url = archived.archive_url or final_url
+    return archived, None
 
 
 def _write_snapshot(config: dict[str, Any], article_id: int,

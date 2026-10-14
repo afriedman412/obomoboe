@@ -367,3 +367,113 @@ class TestArchiveTodaySnapshots:
         assert row["original_url"] == "https://example.com/post"
         assert row["archive_url"] is None
         assert row["site_name"] == "Example"
+
+
+def _page(words, declared=None, free=None, tail=""):
+    """An article of about `words` words, saying what it says about itself."""
+    meta = {}
+    if declared:
+        meta["wordCount"] = declared
+    if free is not None:
+        meta["isAccessibleForFree"] = free
+    ld = ('<script type="application/ld+json">'
+          '{"@type": "NewsArticle", "headline": "A Piece", '
+          + ", ".join(f'"{k}": {str(v).lower() if isinstance(v, bool) else v}'
+                      for k, v in meta.items())
+          + '}</script>') if meta else ""
+    sentences = max(1, words // 10)
+    body = "".join(f"<p>Sentence {i} has exactly ten words in it for the "
+                   f"count.</p>" for i in range(sentences))
+    return (f"<html><head><meta property='og:title' content='A Piece'>{ld}"
+            f"</head><body><article>{body}<p>{tail}</p></article></body></html>")
+
+
+class TestIncompleteCopies:
+    """A page saved before it loaded, or past a paywall, is a fragment."""
+
+    def _capture(self, config, conn, html, url="https://news.example/a"):
+        article_id = make_article(conn, url)
+        path = archiver.capture_path(config, article_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8")
+        return article_id
+
+    def _snapshot(self, monkeypatch, html, calls=None):
+        def fake_archive(url, *args, **kwargs):
+            if calls is not None:
+                calls.append(url)
+            return html, 200, "https://archive.ph/abc"
+        monkeypatch.setattr(archiver, "fetch_from_archive_ph", fake_archive)
+
+    def test_a_fragment_is_replaced_by_a_fuller_snapshot(
+            self, config, conn, monkeypatch):
+        """The NYT page saved before the article loaded: 14 words of 1,587."""
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        article_id = self._capture(config, conn, _page(20, declared=1000))
+        self._snapshot(monkeypatch, _page(1000))
+        archiver.archive_article(config, article_id, from_capture=True)
+        row = db.get_article(conn, article_id)
+        assert row["archive_source"] == "archive.today"
+        assert row["incomplete"] == 0
+        assert "cut off" in row["archive_error"]
+
+    def test_a_fragment_with_no_better_copy_is_flagged(
+            self, config, conn, monkeypatch):
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        article_id = self._capture(config, conn, _page(300, declared=2000))
+
+        def no_snapshot(*args, **kwargs):
+            raise FetchError("no snapshot")
+        monkeypatch.setattr(archiver, "fetch_from_archive_ph", no_snapshot)
+        archiver.archive_article(config, article_id, from_capture=True)
+        row = db.get_article(conn, article_id)
+        assert row["archive_source"] == "browser"
+        assert row["incomplete"] == 1
+        assert "of about 2000 words" in row["archive_error"]
+
+    def test_a_whole_subscriber_copy_is_left_alone(self, config, conn,
+                                                   monkeypatch):
+        """Paywalled, but the page says how long it is and it all came."""
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        calls = []
+        article_id = self._capture(
+            config, conn, _page(1000, declared=1000, free=False,
+                                tail="Already a subscriber? Log in."))
+        self._snapshot(monkeypatch, _page(1000), calls)
+        archiver.archive_article(config, article_id, from_capture=True)
+        row = db.get_article(conn, article_id)
+        assert calls == []
+        assert row["archive_source"] == "browser" and row["incomplete"] == 0
+
+    def test_paywalled_without_a_length_checks_the_archive_but_keeps_a_whole_copy(
+            self, config, conn, monkeypatch):
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        calls = []
+        article_id = self._capture(config, conn, _page(1000, free=False))
+        self._snapshot(monkeypatch, _page(1020), calls)
+        archiver.archive_article(config, article_id, from_capture=True)
+        row = db.get_article(conn, article_id)
+        assert len(calls) == 1
+        assert row["archive_source"] == "browser" and row["incomplete"] == 0
+
+    def test_a_live_page_marked_not_free_goes_to_the_archive(
+            self, config, conn, monkeypatch):
+        """Fetched without a login, a paywalled page is a teaser however
+        long the teaser runs."""
+        config = dict(config, ARCHIVE_PH_ENABLED=True)
+        article_id = make_article(conn)
+        monkeypatch.setattr(archiver, "fetch", lambda *a, **k: extract_mod.Fetched(
+            html=_page(400, free=False), url="https://example.com/post",
+            status_code=200, headers={}))
+        self._snapshot(monkeypatch, _page(1500))
+        archiver.archive_article(config, article_id)
+        assert db.get_article(conn, article_id)["archive_source"] == "archive.today"
+
+    def test_the_list_says_so(self, client, config, conn, monkeypatch):
+        config = dict(config, ARCHIVE_PH_ENABLED=False)
+        article_id = self._capture(config, conn, _page(300, declared=2000))
+        archiver.archive_article(config, article_id, from_capture=True)
+        page = client.get("/?status=all").get_data(as_text=True)
+        assert "Only part of this article came through" in page
+        assert "Only part of this article came through" in \
+            client.get(f"/a/{article_id}").get_data(as_text=True)

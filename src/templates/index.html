@@ -104,6 +104,16 @@
         {{ archive_mark(a.archive_status, a.archive_source,
                          a.archive_error, role="archive-mark") }}
       </div>
+      {% if a.incomplete %}
+        {# Said in words, not just a mark: a fragment filed as the article
+           is easy to miss until the day you sit down to read it. #}
+        <form class="incomplete" data-role="incomplete" method="post"
+              action="{{ url_for('main.rearchive', article_id=a.id) }}">
+          <span>Only part of this article came through.</span>
+          <input type="hidden" name="source" value="archive.ph">
+          <button type="submit">try archive.today</button>
+        </form>
+      {% endif %}
       <div class="tags" data-role="tags">
         {# Real forms so a click still works with JS off, where it removes
            straight away rather than staging. #}

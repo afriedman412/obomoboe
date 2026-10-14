@@ -72,7 +72,21 @@
     </form>
   </div>
 
-  {% if article.archive_error %}
+  {% if article.incomplete %}
+    <div class="notice notice--incomplete">
+      <p><strong>Only part of this article came through.</strong>
+        {{ article.archive_error or '' }}</p>
+      <div>
+        <form method="post" class="inline-form"
+              action="{{ url_for('main.rearchive', article_id=article.id) }}">
+          <input type="hidden" name="source" value="archive.ph">
+          <button type="submit">try archive.today</button>
+        </form>
+        or <a href="{{ submit_url }}" target="_blank" rel="noreferrer">make a
+        snapshot on archive.today by hand</a>, then re-archive.
+      </div>
+    </div>
+  {% elif article.archive_error %}
     <p class="notice">
       {{ article.archive_error }}
       &mdash; <a href="{{ submit_url }}" target="_blank" rel="noreferrer">

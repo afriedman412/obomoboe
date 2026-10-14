@@ -710,6 +710,33 @@ button.chip { cursor: pointer; font-family: var(--stencil); }
 }
 
 /* The confession: why the archive is thin. */
+/* A copy that is only part of the article: said on its row and its page. */
+.incomplete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-family: var(--stencil);
+  font-size: 12px;
+  color: var(--warn);
+}
+.incomplete button {
+  font: inherit;
+  padding: 2px 8px;
+  border: 1.5px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  color: var(--warn);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.incomplete button:hover { background: var(--warn); color: var(--panel); }
+.notice--incomplete p { margin: 0 0 6px; }
+.notice--incomplete p:last-child { margin-bottom: 0; }
+.inline-form { display: inline; }
+
 .notice {
   background: var(--warn-soft);
   color: var(--ink);

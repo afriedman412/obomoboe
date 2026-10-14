@@ -121,6 +121,11 @@ class Extracted:
     # was read from, since the snapshot's images resolve against it.
     original_url: str | None = None
     archive_url: str | None = None
+    # What the page says about itself: how long the article is, and whether
+    # it is free to read. Publishers tag both for search engines; a copy
+    # much shorter than the length it declares is a copy that was cut off.
+    expected_words: int | None = None
+    free: bool | None = None
 
     @property
     def word_count(self) -> int:
@@ -418,6 +423,9 @@ def extract(html: str, url: str, status_code: int = 200,
         if snapshot is not None or not site:
             site = domain_of(result.original_url or url)
         result.site_name = site
+    result.expected_words = declared_word_count(soup, html)
+    result.free = accessible_for_free(soup)
+
     exact = precise_published_at(soup)
     if exact and (not result.published_at
                   or exact[:10] == str(result.published_at)[:10]):
@@ -946,8 +954,86 @@ def looks_paywalled(result: Extracted, min_words: int = 200) -> bool:
     haystack = f"{result.text}\n{result.excerpt or ''}".lower()
     if any(marker in haystack for marker in PAYWALL_MARKERS):
         return True
-    # Little text and no obvious marker still smells like a stub.
-    return result.word_count < min_words
+    # A live fetch is never logged in, so a page that says it is not free
+    # is a teaser here, however long the teaser runs.
+    if result.free is False:
+        return True
+    return looks_incomplete(result, min_words) is not None
+
+
+def looks_incomplete(result: Extracted, min_words: int = 200) -> str | None:
+    """Why this copy looks like part of the article, or None if it doesn't.
+
+    Unlike looks_paywalled this asks only about the copy in hand, so it
+    applies to a page saved from a logged-in browser too: a subscriber's
+    copy of a paywalled piece is whole, and passes.
+    """
+    words = result.word_count
+    expected = result.expected_words
+    if expected:
+        # The page says how long it is: that settles it either way, whatever
+        # the footer says ("Already a subscriber?" closes sfstandard.com's
+        # articles, whole ones included) and however short the piece is.
+        if words < expected * INCOMPLETE_SHARE:
+            return f"only {words} of about {expected} words came through"
+        return None
+    if words < min_words:
+        return f"only {words} words came through"
+    # Otherwise, the paywall's own words where the text stops -- but only on
+    # a page that says it isn't free; on any other it's a footer.
+    tail = result.text[-600:].lower()
+    if result.free is False and any(m in tail for m in PAYWALL_MARKERS):
+        return "the text stops at a paywall"
+    return None
+
+
+# Below this share of the length a page declares, the copy is a fragment.
+# Declared counts run a little off either way -- the NYT's said 1,012 for a
+# piece that extracted to 1,049 -- so there is room before it trips.
+INCOMPLETE_SHARE = 0.8
+
+_WORD_COUNT = re.compile(r'"wordCount"\s*:\s*"?(\d+)')
+
+
+def _ld_walk(node: Any) -> Any:
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _ld_walk(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _ld_walk(value)
+
+
+def declared_word_count(soup: BeautifulSoup, html: str = "") -> int | None:
+    """The article's length as the page states it, if it does.
+
+    From the page's JSON-LD; failing that, from the one wordCount the page
+    carries anywhere (the NYT keeps it in its own preloaded data). Several
+    different counts mean several articles on the page, so none is trusted.
+    """
+    counts = set()
+    for block in _ld_json_blocks(soup):
+        for node in _ld_walk(block):
+            value = node.get("wordCount")
+            if isinstance(value, (int, str)) and str(value).strip().isdigit():
+                counts.add(int(value))
+    if not counts and html:
+        counts = {int(n) for n in _WORD_COUNT.findall(html)}
+    counts.discard(0)
+    return counts.pop() if len(counts) == 1 else None
+
+
+def accessible_for_free(soup: BeautifulSoup) -> bool | None:
+    """The page's isAccessibleForFree, if it gives one."""
+    for block in _ld_json_blocks(soup):
+        for node in _ld_walk(block):
+            if "isAccessibleForFree" in node:
+                value = node["isAccessibleForFree"]
+                if isinstance(value, str):
+                    return value.strip().lower() not in ("false", "no", "0")
+                return bool(value)
+    return None
 
 
 # --------------------------------------------------------------------------
